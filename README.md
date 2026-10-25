@@ -23,11 +23,11 @@
 
 | 层 | 选型 |
 | --- | --- |
-| 前端 | Vue 3 + Vite，图表以原生 SVG 手绘（无重型图表库） |
-| 服务 | Python 3 + FastAPI，SSE 流式响应 |
-| 检索 | BM25 + 中文二元切分，条款级引用 |
-| 模型 | LLM 仅负责组织语言，**不参与任何数值计算** |
-| 数据 | 用户导入的 CSV / 粘贴文本，本地处理，无持久化存储 |
+| 前端 | Vue 3 + TypeScript + Vite，Element Plus 组件库，ECharts 5 图表，Pinia 状态管理 |
+| 服务 | Python 3 + FastAPI，12 个 REST 接口 + SSE 流式响应 |
+| 检索 | 自带 BM25 中文检索引擎，条款级引用 |
+| 模型 | 可选接入任意 OpenAI 兼容接口；**LLM 仅负责组织语言，不参与任何数值计算** |
+| 数据 | 240 名学生模拟数据（固定随机种子），无数据库、无持久化 |
 
 ---
 
@@ -126,47 +126,57 @@
 
 ## 八、运行
 
+环境要求：**Python 3.10+**。前端已构建好放在 `web/site/`，直接运行不需要 Node。
+
 ```bash
-cd academic_guardian
 python -m venv .venv
-.venv\Scripts\activate            # Windows
-pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
-python -m uvicorn app:app --port 8600
+.venv\Scripts\activate                        # Windows
+source .venv/bin/activate                       # macOS / Linux
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m uvicorn app:app --host 127.0.0.1 --port 8600
 ```
 
-打开 <http://127.0.0.1:8600> ，用 URL 可直接进入指定端：
+打开 <http://127.0.0.1:8600>，用侧栏切端，或直接访问路径：
 
-- `/#student` 学生端
-- `/#counselor` 辅导员端
-- `/#admin` 教务端
-- `/#parent` 家长端
+- `/student` 学生端
+- `/counselor` 辅导员端
+- `/admin` 教务端
+- `/parent` 家长端
 
-### 接入大模型（可选）
+> 本工程是**前后端一体**的服务，不能双击 `web/site/index.html` 打开。那样走的是 `file://` 协议，所有 `/api/*` 请求都会失败，页面只会停在空状态。
 
-复制 `.env.example` 为 `.env` 并填写，支持任意 OpenAI 兼容接口（DeepSeek、通义、Kimi、vLLM）：
+### 修改前端（可选）
 
+```bash
+cd web
+npm install --registry=https://registry.npmmirror.com
+npm run dev          # 开发模式，/api 自动代理到 127.0.0.1:8600
+npm run build        # 产物输出到 web/site，刷新页面即生效
+npm run type-check   # TypeScript 类型检查
 ```
-LLM_API_KEY=sk-xxx
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
-```
-
-启动时读取环境变量（Windows 可用 `set LLM_API_KEY=...` 后再启动）。接入后，对话回答与文书措辞由模型改写，但事实字段仍由工具提供；未接入时侧边栏会显示"规则引擎模式"。
 
 ## 九、目录
 
 ```
-academic_guardian/
-├── app.py                  FastAPI 入口与全部接口
+.
+├── app.py                  FastAPI 入口，12 个接口 + SSE 流式响应
 ├── engine/
-│   ├── data.py             模拟学情数据（240 名学生 / 6 门课 / 14 周）
-│   ├── risk.py             风险评分、归因、干预建议、聚合统计
-│   ├── rag.py              BM25 检索
+│   ├── data.py             模拟学情数据（240 名学生 / 6 个班 / 6 门课 / 第 8 教学周）
+│   ├── risk.py             六维评分、归因拆解、干预建议、聚合统计
+│   ├── rag.py              BM25 中文检索
 │   ├── agent.py            意图路由 + 工具调用 + 回答拼装
-│   ├── letters.py          告知函 / 家长信 / 谈话要点 / 周报
+│   ├── letters.py          告知函 / 家长信 / 谈话要点 / 班级周报
 │   └── llm.py              可选的大模型接入
-├── knowledge/              6 所学校校规（RAG 语料）
-├── static/                 前端（Vue 3 CDN + index.html / style.css / app.js）
+├── knowledge/              6 所高校学业管理规定摘要（RAG 语料）
+├── web/
+│   ├── src/views/          四个端的页面，一个端对应一个路由
+│   ├── src/components/     风险环、因素条、分布环形图、抽屉、对话面板等
+│   ├── src/api/client.ts   REST 封装 + 手写 SSE 解析（fetch + ReadableStream）
+│   ├── src/stores/         Pinia：全局数据 + 对话状态
+│   ├── src/types.ts        后端全部载荷的 TypeScript 类型
+│   ├── scripts/verify-ui.mjs  交互验收脚本，用真浏览器点一遍
+│   └── site/               Vite 构建产物，后端默认托管它
+├── static/                 第一版原生实现，仅作回退路径
 └── requirements.txt
 ```
 
