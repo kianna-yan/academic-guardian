@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>学业护航 · 学业预警智能体</title>
+<meta name="description" content="面向学生、辅导员、教务、家长四端的学业预警智能体：用过程数据提前看见风险，每个预警分数都可追溯到具体原因，并给出可执行的补救方案。" />
+<meta property="og:title" content="学业护航 · 学业预警智能体" />
+<meta property="og:description" content="把「期末数挂科」变成「期中看见风险」：多因素风险模型 + 一校一规校规库 + 可解释预警与干预闭环。" />
+<meta property="og:type" content="website" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">护</div>
+      <div class="brand-text">
+        <strong>学业护航</strong>
+        <span>Academic Guardian</span>
+      </div>
+    </div>
+    <nav id="roleNav" class="role-nav"></nav>
+    <div class="side-block">
+      <div class="side-label">当前学期</div>
+      <div class="side-term"><span id="termText">—</span><em id="weekText"></em></div>
+    </div>
+    <div class="side-block">
+      <div class="side-label">数据源</div>
+      <ul class="side-list">
+        <li>教务成绩库</li>
+        <li>课堂考勤</li>
+        <li>作业平台</li>
+        <li>学习行为日志</li>
+      </ul>
+    </div>
+    <div class="side-foot">
+      <div id="llmBadge" class="badge">检测中</div>
+      <span id="updatedAt"></span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 id="pageTitle">学生端</h1>
+        <p id="pageSub"></p>
+      </div>
+      <div class="topbar-right" id="topActions"></div>
+    </header>
+    <section id="view" class="view"></section>
+  </main>
+
+  <aside class="chat" id="chatPanel">
+    <header class="chat-head">
+      <div>
+        <strong id="chatTitle">学业助手</strong>
+        <span id="chatSub">基于你的真实学情数据回答</span>
+      </div>
+      <button class="icon-btn" id="chatClose" title="收起">×</button>
+    </header>
+    <div class="chat-body" id="chatBody"></div>
+    <div class="chat-suggest" id="chatSuggest"></div>
+    <form class="chat-form" id="chatForm">
+      <input id="chatInput" autocomplete="off" placeholder="问点什么，比如：我的风险分为什么这么高？" />
+      <button type="submit">发送</button>
+    </form>
+  </aside>
+  <button class="chat-fab" id="chatFab">问 AI</button>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-card">
+    <header class="modal-head">
+      <div>
+        <h3 id="modalTitle"></h3>
+        <p id="modalSub"></p>
+      </div>
+      <button class="icon-btn" id="modalClose">×</button>
+    </header>
+    <div class="modal-body" id="modalBody"></div>
+    <footer class="modal-foot" id="modalFoot"></footer>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
