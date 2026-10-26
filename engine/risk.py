@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 from statistics import mean, pstdev
 
+from engine import advice, trend as trend_mod
+
 DEFAULT_CONFIG = {
     "red_line": 55,
     "yellow_line": 35,
@@ -230,81 +232,17 @@ class RiskEngine:
 
     # ---------- 干预建议 ----------
     def interventions(self, sid: str) -> list[dict]:
-        s = self.get(sid)
-        r = self.score(sid)
-        raw = r["raw"]
-        actions: list[dict] = []
-        weakest = min(s["courses"], key=lambda c: c["midterm"])
+        """个性化干预动作。具体生成逻辑在 engine/advice.py（按成因分型 + 引用证据）。
 
-        for p in r["factors"][:4]:
-            key = p["key"]
-            if p["points"] < 3:
-                continue
-            if key == "attendance":
-                actions.append({
-                    "factor": "attendance",
-                    "title": f"补回缺勤：已缺 {raw['absent']}/{raw['sessions']} 次课",
-                    "detail": "本周内联系任课教师说明情况，问清缺课章节与补交办法；之后每次课前设一个提前 20 分钟的闹钟。",
-                    "owner": "学生 + 任课教师",
-                    "deadline": "本周五前",
-                    "priority": "high" if p["points"] > 10 else "medium",
-                })
-            elif key == "homework":
-                actions.append({
-                    "factor": "homework",
-                    "title": f"补交作业：{raw['hw_assigned'] - raw['hw_submitted']} 次未交",
-                    "detail": "和老师确认未交作业是否还能计入平时分，能补的先补；剩余作业固定安排在每周三晚自习完成。",
-                    "owner": "学生",
-                    "deadline": "下次课前",
-                    "priority": "high" if p["points"] > 8 else "medium",
-                })
-            elif key == "exam":
-                actions.append({
-                    "factor": "exam",
-                    "title": f"期中低于班级均分 {round(raw['cohort_avg'] - raw['mid_avg'], 1)} 分",
-                    "detail": f"重点补《{weakest['name']}》（期中 {weakest['midterm']} 分，班级均分 {self.course_stats[weakest['code']]['mean']}）。预约每周答疑，先做课后习题前 20 题。",
-                    "owner": "学生 + 学业导师",
-                    "deadline": "两周内",
-                    "priority": "high" if p["points"] > 10 else "medium",
-                })
-            elif key == "engagement":
-                actions.append({
-                    "factor": "engagement",
-                    "title": f"学习平台已 {s['engagement']['days_since_active']} 天未登录",
-                    "detail": "先把本周课程回放看完（约 90 分钟），再完成平台章节测验，恢复学习节奏比一次学很多更重要。",
-                    "owner": "学生",
-                    "deadline": "本周内",
-                    "priority": "medium",
-                })
-            elif key == "history":
-                actions.append({
-                    "factor": "history",
-                    "title": f"上学期累计挂科 {s['history']['failed_credits']} 学分",
-                    "detail": "查清重修窗口开放时间，本学期最多再修 1 门重修课，避免与正课冲突导致两头落空。",
-                    "owner": "学生 + 教务",
-                    "deadline": "选课结束前",
-                    "priority": "high" if s["history"]["failed_credits"] >= 15 else "medium",
-                })
-            elif key == "credit":
-                actions.append({
-                    "factor": "credit",
-                    "title": f"学分进度落后 {raw['credits_deficit']} 学分",
-                    "detail": "本学期起不要再退课，暑期小学期选 2 门通识课补进度，按当前速度仍可在标准学制内毕业。",
-                    "owner": "学生 + 教务",
-                    "deadline": "本学期",
-                    "priority": "medium",
-                })
+        这里保留旧签名，是因为信件生成、学生端清单、接口都在用它；
+        返回值仍是 [{factor,title,detail,owner,deadline,priority}]，
+        另外附带 tag/steps/points，新前端可以直接用，旧调用方忽略即可。
+        """
+        return advice.plan(self, sid)["actions"]
 
-        if not actions:
-            actions.append({
-                "factor": "keep",
-                "title": "保持当前节奏",
-                "detail": "各项指标均在安全区间。建议把这套学习安排固定下来，并关注期中之后的课程难度上升。",
-                "owner": "学生",
-                "deadline": "持续",
-                "priority": "low",
-            })
-        return actions
+    def advice(self, sid: str, score: dict | None = None) -> dict:
+        """完整方案：判断、证据、动作、可调用资源、复查点。"""
+        return advice.plan(self, sid, score)
 
     # ---------- 班级 / 全校聚合 ----------
     def roster(self, class_name: str | None = None, level: str | None = None) -> list[dict]:
@@ -315,6 +253,7 @@ class RiskEngine:
             r = self.score(s["id"])
             if level and r["level"] != level:
                 continue
+            tip = advice.brief(self, s["id"], r)
             rows.append({
                 "id": s["id"],
                 "name": s["name"],
@@ -330,6 +269,12 @@ class RiskEngine:
                 "missed_hw": r["raw"]["hw_assigned"] - r["raw"]["hw_submitted"],
                 "mid_avg": r["raw"]["mid_avg"],
                 "advisor": s["advisor"],
+                "pattern": tip["pattern"],
+                "pattern_label": tip["pattern_label"],
+                "advice": tip["line"],
+                "advice_tag": tip["tag"],
+                # 名单上每行一条迷你走势线：五学期的均分 + 名次变化
+                **trend_mod.roster_extra(s),
             })
         rows.sort(key=lambda x: -x["score"])
         return rows

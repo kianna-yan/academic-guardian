@@ -103,7 +103,8 @@ def parent_letter(engine, kb, sid: str, school: str | None) -> dict:
 
 def counselor_brief(engine, kb, sid: str, school: str | None) -> dict:
     s, r = _facts(engine, sid)
-    acts = engine.interventions(sid)
+    plan = engine.advice(sid)
+    acts = plan["actions"]
     weakest = min(s["courses"], key=lambda c: c["midterm"])
     hits = _cite(kb, school, "帮扶 跟踪 谈话 预警")
     body = [
@@ -112,20 +113,37 @@ def counselor_brief(engine, kb, sid: str, school: str | None) -> dict:
         f"- 最弱一科：《{weakest['name']}》期中 {weakest['midterm']} 分（班均 {engine.course_stats[weakest['code']]['mean']}）",
         f"- 关键行为：缺勤 {r['raw']['absent']} 次，作业少交 {r['raw']['hw_assigned'] - r['raw']['hw_submitted']} 次，平台已 {s['engagement']['days_since_active']} 天未活跃",
         "",
+        f"### 这次谈话的性质：{plan['pattern_label']}",
+        f"{plan['diagnosis']}",
+        "",
+        "**判断依据**",
+    ]
+    for e in plan["evidence"][1:]:
+        body.append(f"- {e}")
+    body += [
+        "",
         "### 建议的谈话顺序",
         "1. **先问状态，别先报数字。** “这学期感觉怎么样？”让他自己说，别一上来就念缺勤次数。",
         f"2. **再对事实。** 把缺勤 {r['raw']['absent']} 次、作业少交 {r['raw']['hw_assigned'] - r['raw']['hw_submitted']} 次摆出来，问是哪一环卡住了。",
-        "3. **区分三类原因。** 能力问题（听不懂）、动力问题（不想学）、生活问题（作息/经济/情绪）——三类对应完全不同的处理。",
+        f"3. **按「{plan['pattern_label']}」的口径切入。** {plan['counselor_tip']}",
         "4. **只约定一件事。** 一次谈三件等于没谈，挑最容易做到的那件。",
         "",
         "### 可以当场承诺的支持",
     ]
     for a in acts[:3]:
-        body.append(f"- {a['title']} —— {a['detail']}")
+        body.append(f"- **{a['title']}** —— {a['detail']}")
+        for step in a.get("steps", [])[:2]:
+            body.append(f"  - {step}")
+    body += [
+        "",
+        "### 可以转介的资源",
+    ]
+    for sup in plan["support"]:
+        body.append(f"- {sup['kind']}：{sup['text']}")
     body += [
         "",
         "### 跟进节点",
-        f"- 一周后：看他是否完成第一件事（{acts[0]['deadline']}）",
+        f"- {plan['watch']['when']}：{plan['watch']['what']}",
         f"- 三周后：复查期中考后的小测与作业，决定是否升级预警",
     ]
     if hits:
@@ -133,10 +151,11 @@ def counselor_brief(engine, kb, sid: str, school: str | None) -> dict:
     return {
         "type": "counselor",
         "title": f"谈话要点 · {s['name']}",
-        "subject": f"{s['name']}（{s['class_name']}）学业谈话提纲",
+        "subject": f"{s['name']}（{s['class_name']}）学业谈话提纲 · {plan['pattern_label']}",
         "body": "\n".join(body),
         "citations": hits,
-        "meta": {"student": s["name"], "sid": s["id"], "score": r["score"]},
+        "meta": {"student": s["name"], "sid": s["id"], "score": r["score"],
+                 "pattern": plan["pattern"], "pattern_label": plan["pattern_label"]},
     }
 
 
@@ -145,16 +164,22 @@ def class_report(engine, class_name: str) -> dict:
     red = [r for r in rows if r["level"] == "red"]
     yellow = [r for r in rows if r["level"] == "yellow"]
     rising = [r for r in rows if r["direction"] == "up" and r["level"] != "red"]
+    # 成因分布：让辅导员一眼看出本周这批人该往哪个方向使劲
+    groups: dict[str, int] = {}
+    for r in red + yellow:
+        groups[r["pattern_label"]] = groups.get(r["pattern_label"], 0) + 1
+    mix = "、".join(f"{k} {v} 人" for k, v in sorted(groups.items(), key=lambda kv: -kv[1]))
     body = [
         f"### {class_name} 第 8 教学周学情简报",
         "",
         f"- 在册 {len(rows)} 人，红色预警 **{len(red)}** 人，黄色关注 **{len(yellow)}** 人",
         f"- 风险上升 {len(rising)} 人，平均风险分 {round(sum(r['score'] for r in rows) / len(rows), 1)}",
-        "",
-        "### 需要本周谈话",
     ]
+    if mix:
+        body.append(f"- 成因构成：{mix}")
+    body += ["", "### 需要本周谈话"]
     for r in red[:5]:
-        body.append(f"- {r['name']}（{r['score']} 分）主因：{r['top_factor']}，缺勤 {r['absent']} 次")
+        body.append(f"- **{r['name']}**（{r['score']} 分 · {r['pattern_label']}）：{r['advice']}")
     if not red:
         body.append("- 本周无红色预警学生")
     body += ["", "### 值得关注的变化"]
