@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { api } from "@/api/client";
+import { api, downloadDoc } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
+import ChatHome from "@/components/ChatHome.vue";
+import DashNav from "@/components/DashNav.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
 import RiskRing from "@/components/RiskRing.vue";
 import { useAppStore } from "@/stores/app";
+import { useAuthStore } from "@/stores/auth";
+import { useChatStore } from "@/stores/chat";
 import type { Citation, StudentDetail } from "@/types";
 
 const app = useAppStore();
+const auth = useAuthStore();
+const chat = useChatStore();
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(true);
 const error = ref("");
@@ -20,7 +26,8 @@ const dialog = reactive({
   citations: [] as Citation[],
 });
 
-const sid = computed(() => app.meta?.demo?.parent || "");
+// 家长登录时输入的就是孩子学号，这里直接用登录身份里的 sid
+const sid = computed(() => auth.profile?.sid || "");
 
 const tone = computed(() => {
   const level = detail.value?.risk.level;
@@ -46,7 +53,7 @@ async function load() {
   }
 }
 
-watch(() => app.meta, (m) => m && load(), { immediate: true });
+watch(() => auth.profile?.sid, (v) => v && load(), { immediate: true });
 
 async function openLetter() {
   if (!sid.value) return;
@@ -64,10 +71,19 @@ async function openLetter() {
 </script>
 
 <template>
-  <Teleport to="#top-actions">
-    <span class="badge" style="background: #fff7ed; color: #b45309">家长视角</span>
-    <button class="btn primary" @click="openLetter">生成家长信</button>
-  </Teleport>
+  <!-- 对话是主入口：进来就是整页 AI 问答，孩子的学情报告按键前往 -->
+  <ChatHome v-if="chat.homeMode === 'chat'" role="parent" :sid="sid || null" />
+
+  <template v-else>
+    <DashNav />
+
+    <div class="view-actions">
+      <span class="badge" style="background: #fff7ed; color: #b45309">家长视角</span>
+      <button class="btn primary" @click="openLetter">生成家长信</button>
+      <button v-if="sid" class="btn" @click="downloadDoc(`/api/export/letter/${sid}?type=parent`)">
+        导出家长信 Word
+      </button>
+    </div>
 
   <div v-if="loading" class="card">
     <div class="skeleton" style="height: 148px"></div>
@@ -160,6 +176,7 @@ async function openLetter() {
     :body="dialog.body"
     :citations="dialog.citations"
   />
+  </template>
 </template>
 
 <style scoped>

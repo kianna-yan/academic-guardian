@@ -10,7 +10,7 @@ const props = withDefaults(defineProps<{ score: number; level: Level; size?: num
 const LEVEL_COLOR: Record<Level, string> = { red: "#dc2626", yellow: "#d97706", green: "#047857" };
 
 const el = ref<HTMLElement | null>(null);
-const color = computed(() => LEVEL_COLOR[props.level] ?? "#1d4ed8");
+const color = computed(() => LEVEL_COLOR[props.level] ?? "#b45309");
 const value = computed(() => Math.max(0, Math.min(100, Number(props.score) || 0)));
 
 const option = computed(() => ({
@@ -27,7 +27,7 @@ const option = computed(() => ({
       itemStyle: { borderRadius: 10 },
       data: [
         { value: value.value, itemStyle: { color: color.value } },
-        { value: 100 - value.value, itemStyle: { color: "#eef0f3" } },
+        { value: 100 - value.value, itemStyle: { color: "#f1e8da" } },
       ],
     },
   ],

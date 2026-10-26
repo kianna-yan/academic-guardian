@@ -1,12 +1,20 @@
 import axios, { type AxiosRequestConfig } from "axios";
 import type {
+  AccountRow,
+  AgentBriefing,
+  AuthProfile,
   ChatAnswer,
   ChatTrace,
   Citation,
+  CurriculumImportResult,
+  CurriculumPayload,
+  ImportResult,
   Intervention,
   Letter,
+  LoginResult,
   Meta,
   Overview,
+  Role,
   RosterRow,
   StudentDetail,
 } from "@/types";
@@ -38,9 +46,34 @@ if (SHARE_CODE && !new URLSearchParams(location.search).get("sharecode")) {
 
 export const http = axios.create({ baseURL: "/api", timeout: 25000 });
 
+/* ------------------------------------------------------------------
+ * 登录态
+ * token 放 localStorage（关掉页面再回来还在），每次请求带 Bearer。
+ * 过期由后端判 401，前端收到 401 就清掉并踢回登录页。
+ * ---------------------------------------------------------------- */
+const TOKEN_KEY = "ag.token";
+
+export function getToken(): string {
+  return localStorage.getItem(TOKEN_KEY) || "";
+}
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 http.interceptors.request.use((config) => {
+  const token = getToken();
   if (SHARE_CODE) {
     config.params = { ...(config.params || {}), sharecode: SHARE_CODE };
+  }
+  if (token) {
+    // 线上托管网关会用自己的 JWT 覆写 Authorization 头，所以另走自定义头；
+    // 再附一个 query 参数兜底（网关对 query 是透传的），本地直连两种都认。
+    config.headers.set("X-Ag-Token", token);
+    config.headers.set("Authorization", `Bearer ${token}`);
+    config.params = { ...(config.params || {}), ag_token: token };
   }
   return config;
 });
@@ -48,6 +81,14 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (res) => res,
   (err) => {
+    if (err?.response?.status === 401) {
+      clearToken();
+      if (!location.pathname.startsWith("/login")) {
+        // 线上是按 sharecode 放行的，跳登录页也得把分享码带上，否则会被网关 403
+        const q = SHARE_CODE ? `?sharecode=${encodeURIComponent(SHARE_CODE)}` : "";
+        location.replace(`/login${q}`);
+      }
+    }
     const detail =
       err?.response?.data?.detail ||
       err?.response?.statusText ||
@@ -71,6 +112,22 @@ async function post<T>(url: string, body?: unknown, config?: AxiosRequestConfig)
  * REST
  * ---------------------------------------------------------------- */
 export const api = {
+  login: (body: { role: Role; account: string; password: string }) =>
+    post<LoginResult>("/auth/login", body),
+  me: () =>
+    get<{
+      profile: AuthProfile;
+      stats: Record<string, number>;
+      defaults: Record<string, string>;
+      staff_accounts: Record<string, string>;
+    }>("/auth/me"),
+  changePassword: (body: { old_password: string; new_password: string }) =>
+    post<{ ok: boolean; profile: AuthProfile }>("/auth/change-password", body),
+  accounts: (limit = 200) =>
+    get<{ rows: AccountRow[]; stats: Record<string, number> }>("/auth/accounts", {
+      params: { limit },
+    }),
+  importStudents: (text: string) => post<ImportResult>("/auth/import-students", { text }),
   meta: () => get<Meta>("/meta"),
   overview: () => get<Overview>("/overview"),
   students: (params: { class_name?: string; level?: string; limit?: number } = {}) =>
@@ -89,7 +146,34 @@ export const api = {
     post<{ ok: boolean; item: Intervention }>(`/interventions/${sid}`, body),
   chat: (body: { role: string; sid: string | null; message: string }) =>
     post<ChatAnswer>("/chat", body),
+  briefing: () => get<AgentBriefing>("/agent/briefing"),
+  resetAgent: () => post<{ ok: boolean }>("/agent/reset", {}),
+  dailyReport: () =>
+    get<{
+      date: string;
+      week: number | string;
+      generated_at: string;
+      scheduled_at: string | null;
+      runs: number;
+      summary: string;
+      body: string;
+      red_top: { name: string; class_name: string; score: number }[];
+      rising: { name: string; class_name: string; delta: number; score: number }[];
+      docx_url: string;
+      smtp_configured: boolean;
+    }>("/agent/daily-report"),
+  curriculum: () => get<CurriculumPayload>("/curriculum"),
+  importCurriculum: (text: string) => post<CurriculumImportResult>("/curriculum/import", { text }),
 };
+
+/* ------------------------------------------------------------------
+ * 文书下载：/api/export/* 的 <a>/window.open 直接触发，token 走 ag_token query。
+ * ---------------------------------------------------------------- */
+export function downloadDoc(path: string): void {
+  const token = localStorage.getItem(TOKEN_KEY) || "";
+  const joiner = path.includes("?") ? "&" : "?";
+  window.open(`${path}${joiner}ag_token=${encodeURIComponent(token)}`, "_blank", "noopener");
+}
 
 /* ------------------------------------------------------------------
  * 流式对话（SSE over POST）
@@ -97,6 +181,7 @@ export const api = {
  * ---------------------------------------------------------------- */
 export type StreamEvent =
   | { type: "meta"; intent: string }
+  | { type: "thought"; text: string }
   | { type: "tool"; trace: ChatTrace }
   | { type: "delta"; text: string }
   | { type: "citations"; citations: Citation[] }
@@ -109,14 +194,26 @@ export async function chatStream(
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const qs = SHARE_CODE ? `?sharecode=${encodeURIComponent(SHARE_CODE)}` : "";
+  const token = getToken();
+  const params = new URLSearchParams();
+  if (SHARE_CODE) params.set("sharecode", SHARE_CODE);
+  if (token) params.set("ag_token", token);
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`/api/chat/stream${qs}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...(token ? { "X-Ag-Token": token, Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
     signal,
   });
 
+  if (res.status === 401) {
+    clearToken();
+    throw new Error("登录已过期，请重新登录");
+  }
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status}`);
@@ -164,6 +261,8 @@ function parseBlock(raw: string): StreamEvent | null {
   switch (name) {
     case "meta":
       return { type: "meta", intent: payload.intent };
+    case "thought":
+      return { type: "thought", text: String(payload.text ?? "") };
     case "tool":
       return { type: "tool", trace: payload as ChatTrace };
     case "delta":

@@ -4,15 +4,15 @@
    ========================================================================== */
 
 :root {
-  --bg: #f3f4f6;
+  --bg: #faf5ee;
   --card: #ffffff;
-  --line: #e5e7eb;
-  --line-strong: #d1d5db;
-  --text: #111827;
-  --text-2: #4b5563;
-  --muted: #6b7280;
-  --brand: #1d4ed8;
-  --brand-soft: #eff6ff;
+  --line: #eadfcd;
+  --line-strong: #d9c9b3;
+  --text: #3b2e24;
+  --text-2: #5d4b3a;
+  --muted: #8e7a66;
+  --brand: #d97706;
+  --brand-soft: #fdf1de;
   --red: #dc2626;
   --red-soft: #fef2f2;
   --amber: #b45309;
@@ -20,20 +20,20 @@
   --green: #047857;
   --green-soft: #ecfdf5;
   --radius: 12px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 2px rgba(59, 46, 36, 0.05), 0 1px 3px rgba(59, 46, 36, 0.07);
 
-  /* Element Plus 主题对齐 */
-  --el-color-primary: #1d4ed8;
-  --el-color-primary-light-3: #4b74e3;
-  --el-color-primary-light-5: #7d9beb;
-  --el-color-primary-light-9: #eff6ff;
+  /* Element Plus 主题对齐（暖琥珀） */
+  --el-color-primary: #d97706;
+  --el-color-primary-light-3: #e4a051;
+  --el-color-primary-light-5: #ecbb83;
+  --el-color-primary-light-9: #fdeee2;
   --el-border-radius-base: 8px;
   --el-font-size-base: 13px;
-  --el-text-color-regular: #4b5563;
-  --el-text-color-primary: #111827;
-  --el-border-color: #e5e7eb;
-  --el-border-color-light: #eef0f3;
-  --el-fill-color-light: #fafbfc;
+  --el-text-color-regular: #5d4b3a;
+  --el-text-color-primary: #3b2e24;
+  --el-border-color: #eadfcd;
+  --el-border-color-light: #f2e9da;
+  --el-fill-color-light: #faf6ee;
 }
 
 * {
@@ -69,22 +69,19 @@ a {
   text-decoration: none;
 }
 
-/* ---------- 三栏骨架 ---------- */
+/* ---------- 两栏骨架：侧栏 + 主区（对话为主入口，聊天占满主区） ---------- */
 .app {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 360px;
+  grid-template-columns: 232px minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
 }
-.app.chat-collapsed {
-  grid-template-columns: 232px minmax(0, 1fr);
-}
 
 /* ---------- 侧边栏 ---------- */
 .sidebar {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #33231a;
+  color: #f4ebdf;
   padding: 22px 18px 18px;
   display: flex;
   flex-direction: column;
@@ -122,7 +119,7 @@ a {
 }
 .brand-text span {
   font-size: 10px;
-  color: #94a3b8;
+  color: #b09b85;
   letter-spacing: 0.6px;
 }
 
@@ -140,7 +137,7 @@ a {
   border-radius: 8px;
   background: transparent;
   border: 0;
-  color: #cbd5e1;
+  color: #ddcbb3;
   text-align: left;
   transition: background 0.15s, color 0.15s;
   width: 100%;
@@ -152,10 +149,10 @@ a {
 .role-btn em {
   font-size: 11px;
   font-style: normal;
-  color: #64748b;
+  color: #a58c72;
 }
 .role-btn:hover {
-  background: #1e293b;
+  background: #452f22;
   color: #fff;
 }
 .role-btn.active {
@@ -163,7 +160,7 @@ a {
   color: #fff;
 }
 .role-btn.active em {
-  color: #bfdbfe;
+  color: #f6dcae;
 }
 
 .side-block {
@@ -174,7 +171,7 @@ a {
 .side-label {
   font-size: 10px;
   letter-spacing: 1px;
-  color: #64748b;
+  color: #a58c72;
   text-transform: uppercase;
 }
 .side-term {
@@ -185,7 +182,7 @@ a {
 }
 .side-term em {
   font-style: normal;
-  color: #93c5fd;
+  color: #edb269;
   font-size: 12px;
 }
 .side-list {
@@ -198,7 +195,7 @@ a {
 }
 .side-list li {
   font-size: 12px;
-  color: #94a3b8;
+  color: #b09b85;
   padding-left: 12px;
   position: relative;
 }
@@ -210,7 +207,7 @@ a {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #334155;
+  background: #6b5442;
 }
 .side-foot {
   margin-top: auto;
@@ -218,15 +215,15 @@ a {
   flex-direction: column;
   gap: 6px;
   font-size: 11px;
-  color: #64748b;
+  color: #a58c72;
 }
 .badge {
   display: inline-block;
   align-self: flex-start;
   padding: 2px 8px;
   border-radius: 20px;
-  background: #1e293b;
-  color: #94a3b8;
+  background: #452f22;
+  color: #b09b85;
   font-size: 11px;
 }
 .badge.on {
@@ -266,9 +263,16 @@ a {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-/* 各视图通过 Teleport 往这里塞操作按钮，用 contents 让它们直接参与父级 flex 布局 */
-#top-actions {
-  display: contents;
+/* 视图操作区：原先各视图用 Teleport 塞进顶栏，但跨组件 Teleport 的内容在视图重渲染时
+   会拿已被置空的 vnode 去 patch，压缩构建下偶发抛 null（emitsOptions / patchProp）。
+   改成内容区顶部独立一行，结构上不跨组件，彻底避开这类竞态。 */
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin: 2px 0 12px;
 }
 
 .select,
@@ -289,7 +293,7 @@ a {
   transition: background 0.15s, border-color 0.15s;
 }
 .btn:hover {
-  border-color: #9ca3af;
+  border-color: #c2a98d;
 }
 .btn:disabled {
   opacity: 0.55;
@@ -301,7 +305,7 @@ a {
   color: #fff;
 }
 .btn.primary:hover {
-  background: #1e40af;
+  background: #b45309;
 }
 .btn.sm {
   height: 28px;
@@ -315,6 +319,13 @@ a {
   overflow-x: hidden;
   padding: 6px 28px 32px;
   min-width: 0;
+}
+/* 整页对话模式：view 变成不滚动的 flex 容器，让聊天自己管理滚动 */
+.view.view-chat {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 6px 28px 18px;
 }
 
 /* ---------- 卡片 ---------- */
@@ -339,6 +350,27 @@ a {
 .card-head .hint {
   font-size: 11.5px;
   color: var(--muted);
+}
+.card-head .head-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 每日预警日报卡：重点学生一条一条排开 */
+.report-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.report-strip .rs-item {
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 14px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+.report-strip .rs-item b {
+  font-weight: 600;
 }
 .muted {
   color: var(--muted);
@@ -406,7 +438,7 @@ a {
   margin-top: 14px;
 }
 .fact {
-  background: #fafafa;
+  background: #faf5ec;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 11px;
@@ -454,7 +486,7 @@ a {
 .bar {
   height: 7px;
   border-radius: 20px;
-  background: #eef0f3;
+  background: #f1e8da;
   overflow: hidden;
 }
 .bar i {
@@ -517,7 +549,7 @@ a {
   display: inline-block;
   padding: 1px 7px;
   border-radius: 4px;
-  background: #f3f4f6;
+  background: #f6efe4;
   color: var(--text-2);
   font-size: 11px;
 }
@@ -544,10 +576,10 @@ a {
 }
 .table td {
   padding: 9px 10px;
-  border-bottom: 1px solid #f1f2f4;
+  border-bottom: 1px solid #f0e7d8;
 }
 .table tbody tr:hover {
-  background: #fafbfc;
+  background: #faf5ec;
 }
 .table .num {
   font-variant-numeric: tabular-nums;
@@ -647,40 +679,7 @@ a {
   margin-top: 3px;
 }
 
-/* ---------- 聊天面板 ---------- */
-.chat {
-  background: #fff;
-  border-left: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-.chat-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 18px 12px;
-  border-bottom: 1px solid var(--line);
-  flex: 0 0 auto;
-}
-.chat-head strong {
-  font-size: 13.5px;
-  display: block;
-}
-.chat-head span {
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.chat-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-height: 0;
-}
+/* ---------- 消息气泡（整页对话与历史面板共用） ---------- */
 .msg {
   display: flex;
   flex-direction: column;
@@ -696,7 +695,7 @@ a {
   border-radius: 12px 12px 2px 12px;
 }
 .bubble {
-  background: #f5f6f8;
+  background: #f7f1e7;
   border-radius: 12px 12px 12px 2px;
   padding: 10px 12px;
   font-size: 13px;
@@ -722,7 +721,7 @@ a {
   padding-left: 18px;
 }
 .cite {
-  border-left: 2px solid #cbd5e1;
+  border-left: 2px solid #ddcbb3;
   padding: 4px 0 4px 9px;
   font-size: 11.5px;
   color: var(--text-2);
@@ -731,13 +730,7 @@ a {
   font-weight: 500;
   color: var(--text);
 }
-.chat-suggest {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 18px 8px;
-  flex: 0 0 auto;
-}
+/* 通用胶囊按钮：建议词 / 筛选 / 追问等 */
 .chip {
   border: 1px solid var(--line-strong);
   background: #fff;
@@ -745,61 +738,180 @@ a {
   font-size: 11.5px;
   padding: 3px 10px;
   color: var(--text-2);
+  cursor: pointer;
 }
 .chip:hover {
   border-color: var(--brand);
   color: var(--brand);
 }
-.chat-form {
-  display: flex;
-  gap: 8px;
-  padding: 12px 18px 16px;
-  border-top: 1px solid var(--line);
-  flex: 0 0 auto;
-}
-.chat-form input {
+
+/* ---------- Agent 执行轨迹 ---------- */
+/* ---------- 整页对话（ChatHome） ---------- */
+.chat-home {
   flex: 1;
-  height: 36px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-family: inherit;
-  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
-.chat-form button {
-  height: 36px;
-  padding: 0 16px;
-  border-radius: 8px;
-  border: 0;
-  background: var(--brand);
-  color: #fff;
-  font-size: 13px;
+.chat-home-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
-.chat-form button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.chat-home-head .ch-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
-.chat-fab {
-  position: fixed;
-  right: 22px;
-  bottom: 22px;
-  display: none;
-  height: 42px;
-  padding: 0 18px;
-  border-radius: 22px;
-  border: 0;
-  background: var(--brand);
+.chat-home-head .ch-title strong {
+  font-size: 14.5px;
+}
+.chat-home-head .ch-title span {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.ch-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #c2410c, #e89243);
   color: #fff;
   font-size: 13px;
-  box-shadow: 0 6px 18px rgba(29, 78, 216, 0.28);
-  z-index: 30;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  letter-spacing: 0.5px;
 }
-.chat-fab.show {
+.ch-go-dash {
+  flex: none;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid #f0d9b5;
+  background: #fdf1de;
+  color: #b45309;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ch-go-dash:hover {
+  background: #f8e8cc;
+  border-color: #e3b980;
+}
+.chat-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 10px;
+}
+.chat-col {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.chat-col .briefing {
+  margin-bottom: 2px;
+}
+.chat-home-foot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  padding: 10px 20px 14px;
+}
+.chat-home-foot .chat-col {
+  gap: 8px;
+}
+.ch-draft {
+  display: flex;
+  gap: 8px;
+}
+.ch-draft input {
+  flex: 1;
+  height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  font-family: inherit;
+  min-width: 0;
+}
+.ch-draft input:focus {
+  outline: 2px solid rgba(217, 119, 6, 0.25);
+  border-color: #e3b980;
+}
+.ch-draft button {
+  height: 42px;
+  padding: 0 22px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--brand);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 500;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.ch-draft button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.chat-stream .msg .bubble {
+  max-width: 92%;
+}
+
+/* ---------- 看板顶部导航（DashNav） ---------- */
+.dash-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 0 14px;
+  padding: 10px 14px;
+  border: 1px dashed #f0d9b5;
+  background: #fdf4e6;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #8a6d4a;
+}
+.dash-nav .btn-back-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #c2410c, #e89243);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(194, 65, 12, 0.28);
+}
+.dash-nav .btn-back-chat:hover {
+  filter: brightness(1.06);
+}
+.dash-nav .dn-hint {
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 /* Agent 执行轨迹 */
@@ -814,9 +926,9 @@ a {
   align-items: center;
   gap: 4px;
   font-size: 10.5px;
-  color: #475569;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  color: #7a6450;
+  background: #f7f0e5;
+  border: 1px solid #ecdfca;
   border-radius: 5px;
   padding: 1px 7px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -824,13 +936,13 @@ a {
 .trace-step.running {
   color: var(--brand);
   background: var(--brand-soft);
-  border-color: #bfdbfe;
+  border-color: #f6dcae;
 }
 .trace-step .dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: #b09b85;
 }
 .trace-step.running .dot {
   background: var(--brand);
@@ -838,7 +950,7 @@ a {
 }
 .trace-total {
   font-size: 10.5px;
-  color: #94a3b8;
+  color: #b09b85;
   font-family: ui-monospace, monospace;
 }
 @keyframes pulse {
@@ -898,7 +1010,7 @@ a {
   margin: 6px 0;
 }
 .md code {
-  background: #f1f5f9;
+  background: #f7f0e5;
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 12px;
@@ -914,7 +1026,7 @@ a {
 .spinner {
   width: 18px;
   height: 18px;
-  border: 2px solid #dbeafe;
+  border: 2px solid #f2dcb8;
   border-top-color: var(--brand);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -926,7 +1038,7 @@ a {
   }
 }
 .skeleton {
-  background: linear-gradient(90deg, #f1f2f4 25%, #e9ebee 37%, #f1f2f4 63%);
+  background: linear-gradient(90deg, #f6efe4 25%, #eee2cf 37%, #f6efe4 63%);
   background-size: 400% 100%;
   animation: shimmer 1.3s ease infinite;
   border-radius: 8px;
@@ -945,7 +1057,7 @@ a {
   --el-table-border-color: var(--line);
   --el-table-header-text-color: var(--muted);
   --el-table-text-color: var(--text);
-  --el-table-row-hover-bg-color: #fafbfc;
+  --el-table-row-hover-bg-color: #faf5ec;
   font-size: 12.5px;
 }
 .el-table th.el-table__cell {
@@ -955,7 +1067,7 @@ a {
 }
 .el-table td.el-table__cell,
 .el-table th.el-table__cell.is-leaf {
-  border-bottom: 1px solid #f1f2f4;
+  border-bottom: 1px solid #f0e7d8;
 }
 .el-table::before,
 .el-table--group::after,
@@ -1027,30 +1139,6 @@ a {
   .app {
     grid-template-columns: 200px minmax(0, 1fr);
   }
-  .app.chat-collapsed {
-    grid-template-columns: 200px minmax(0, 1fr);
-  }
-  .chat {
-    position: fixed;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 360px;
-    box-shadow: -8px 0 30px rgba(15, 23, 42, 0.12);
-    z-index: 40;
-    display: none;
-  }
-  .chat.open {
-    display: flex;
-  }
-  .chat-fab {
-    display: none;
-  }
-  .chat-fab.show {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
   .two-col,
   .three-col {
     grid-template-columns: minmax(0, 1fr);
@@ -1066,9 +1154,6 @@ a {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100dvh;
-  }
-  .app.chat-collapsed {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
@@ -1139,7 +1224,41 @@ a {
     gap: 8px;
   }
   .view {
-    padding: 4px 14px 88px;
+    padding: 4px 14px 24px;
+  }
+  .view.view-chat {
+    padding: 4px 10px 10px;
+  }
+  .chat-home-head {
+    padding: 12px 14px;
+    gap: 9px;
+  }
+  .chat-home-head .ch-title strong {
+    font-size: 13.5px;
+  }
+  .ch-go-dash {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 11.5px;
+  }
+  .chat-stream {
+    padding: 14px 12px 8px;
+  }
+  .chat-stream .msg .bubble {
+    max-width: 100%;
+  }
+  .chat-home-foot {
+    padding: 8px 12px 12px;
+  }
+  .ch-draft input {
+    height: 40px;
+  }
+  .ch-draft button {
+    height: 40px;
+    padding: 0 16px;
+  }
+  .dash-nav {
+    padding: 8px 11px;
   }
 
   .risk-hero {
@@ -1188,18 +1307,6 @@ a {
     white-space: nowrap;
   }
 
-  .chat {
-    width: 100%;
-    max-width: 100%;
-    border-left: 0;
-  }
-  .chat-head {
-    padding: 14px 16px;
-  }
-  .chat-fab {
-    right: 14px;
-    bottom: 16px;
-  }
   .el-drawer {
     width: 100% !important;
   }

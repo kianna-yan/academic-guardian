@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { api } from "@/api/client";
+import { api, downloadDoc } from "@/api/client";
+import ChatHome from "@/components/ChatHome.vue";
+import DashNav from "@/components/DashNav.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
 import StatGrid from "@/components/StatGrid.vue";
 import StudentDrawer from "@/components/StudentDrawer.vue";
+import TrendSpark from "@/components/TrendSpark.vue";
 import { useNarrow } from "@/composables/useViewport";
 import { useAppStore } from "@/stores/app";
+import { useChatStore } from "@/stores/chat";
 import type { Citation, RosterRow } from "@/types";
 
 const app = useAppStore();
+const chat = useChatStore();
 // 手机屏只留关键列，其余列在抽屉里看
 const narrow = useNarrow();
 
@@ -62,6 +67,12 @@ async function load() {
 watch(() => [filters.class_name, filters.level], load);
 onMounted(load);
 
+/* 名单里的成绩走势：只给方向和名次，具体分数点进抽屉看 */
+function gtTitle(row: RosterRow) {
+  const pts = (row.trend_points || []).map((v) => v.toFixed(1)).join(" → ");
+  return `${row.trend_label}｜班级第 ${row.trend_rank} / ${row.trend_rank_total} 名\n${pts}\n大一上 → 大三上（期中），前四项为学期总评`;
+}
+
 function openStudent(row: RosterRow) {
   drawer.sid = row.id;
   drawer.open = true;
@@ -98,13 +109,22 @@ async function openLetter(type: "student" | "counselor") {
 </script>
 
 <template>
-  <Teleport to="#top-actions">
+  <!-- 对话是主入口：进来就是整页 AI 问答，预警名单按键前往 -->
+  <ChatHome v-if="chat.homeMode === 'chat'" role="counselor" :sid="null" />
+
+  <template v-else>
+    <DashNav />
+
+    <div class="view-actions">
+      <button class="btn" @click="downloadDoc('/api/export/interventions')">导出干预台账 Word</button>
+      <button class="btn" @click="downloadDoc('/api/export/daily-report')">今日预警日报</button>
+    </div>
     <div class="top-filters">
       <!--
         这里刻意用原生 select 而不是 el-select：
-        跨组件 Teleport 里有状态组件时，视图重渲染会让 Vue 拿上一次的 vnode 去 patch，
-        而那个 vnode 的 component 已经被置空，压缩构建下会抛
-        "Cannot read properties of null (reading 'emitsOptions')"。原生元素没有这个问题。
+        el-select 是带内部状态的组件，在“整页重渲染 + 视口切换”交替发生时会
+        拿旧的 vnode 去 patch，压缩构建下抛 "Cannot read properties of null (reading 'emitsOptions')"。
+        原生元素没有内部实例，重渲染多少次都只是改属性，最稳。
       -->
       <select v-model="filters.class_name" class="sel" aria-label="按班级筛选">
         <option value="">全部班级</option>
@@ -117,7 +137,6 @@ async function openLetter(type: "student" | "counselor") {
       </select>
       <button class="btn" @click="openReport">生成班级周报</button>
     </div>
-  </Teleport>
 
   <StatGrid :items="stats" />
 
@@ -135,19 +154,16 @@ async function openLetter(type: "student" | "counselor") {
         <div class="m-main">
           <b>{{ r.name }}</b>
           <span class="tiny muted">{{ r.id }} · {{ r.class_name }} · {{ r.top_factor }}</span>
+          <span class="tiny m-adv">{{ r.pattern_label }} · {{ r.advice_tag }}</span>
         </div>
         <div class="m-side">
+          <TrendSpark
+            :points="r.trend_points || []"
+            :width="52"
+            :height="20"
+            :direction="r.trend_direction"
+          />
           <span class="score-chip" :class="r.level">{{ r.score }}</span>
-          <span
-            :class="{
-              'trend-up': r.direction === 'up',
-              'trend-down': r.direction === 'down',
-              'trend-flat': r.direction === 'flat',
-            }"
-          >
-            {{ r.direction === "up" ? "↑" : r.direction === "down" ? "↓" : "→" }}
-            {{ Math.abs(r.delta).toFixed(0) }}
-          </span>
         </div>
       </div>
       <div v-if="!rows.length" class="empty">没有符合条件的学生</div>
@@ -161,52 +177,73 @@ async function openLetter(type: "student" | "counselor") {
         :row-style="{ cursor: 'pointer' }"
         @row-click="openStudent"
       >
-        <el-table-column label="学生" min-width="116">
+        <!-- 学生单元格里带上三项事实，省掉三列，把宽度留给「本周先做」 -->
+        <el-table-column label="学生 / 事实" min-width="182">
           <template #default="{ row }">
             <div class="stu-cell">
               <b>{{ row.name }}</b>
-              <span class="tiny muted">{{ row.id }}</span>
+              <span class="tiny muted">{{ row.id }} · {{ row.class_name }}</span>
+              <span class="tiny fact-line">
+                缺勤 {{ row.absent }} · 未交 {{ row.missed_hw }} · 期中 {{ row.mid_avg }}
+              </span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="class_name" label="班级" width="96" />
         <el-table-column label="风险分" width="74">
           <template #default="{ row }">
-            <span class="score-chip" :class="row.level">{{ row.score }}</span>
+            <div class="risk-cell">
+              <span class="score-chip" :class="row.level">{{ row.score }}</span>
+              <!-- 风险分相对上学期的变化，和「成绩走势」是两回事：一个看风险，一个看分数 -->
+              <span
+                class="rd"
+                :class="{
+                  'trend-up': row.direction === 'up',
+                  'trend-down': row.direction === 'down',
+                  'trend-flat': row.direction === 'flat',
+                }"
+              >
+                {{ row.direction === "up" ? "↑" : row.direction === "down" ? "↓" : "→" }}
+                {{ Math.abs(row.delta).toFixed(0) }}
+              </span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="等级" width="58">
+        <el-table-column label="等级" width="56">
           <template #default="{ row }">
             <span class="level-pill" :class="row.level" style="font-size: 11px">
               {{ row.level === "red" ? "红" : row.level === "yellow" ? "黄" : "绿" }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="趋势" width="62">
+        <el-table-column label="成绩走势" width="112">
           <template #default="{ row }">
-            <span
-              :class="{
-                'trend-up': row.direction === 'up',
-                'trend-down': row.direction === 'down',
-                'trend-flat': row.direction === 'flat',
-              }"
-            >
-              {{ row.direction === "up" ? "↑" : row.direction === "down" ? "↓" : "→" }}
-              {{ Math.abs(row.delta).toFixed(0) }}
-            </span>
+            <div class="gt-cell" :title="gtTitle(row)">
+              <TrendSpark
+                :points="row.trend_points || []"
+                :width="88"
+                :height="24"
+                :direction="row.trend_direction"
+              />
+              <span class="gt-meta">
+                <b>{{ row.trend_rank ? `第 ${row.trend_rank} 名` : "—" }}</b>
+                <span
+                  v-if="row.trend_rank_delta"
+                  class="gt-delta"
+                  :class="row.trend_rank_delta > 0 ? 'bad' : 'good'"
+                >
+                  {{ row.trend_rank_delta > 0 ? "↓" : "↑" }}{{ Math.abs(row.trend_rank_delta) }}
+                </span>
+                <span v-else class="gt-delta flat">持平</span>
+              </span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="top_factor" label="主因" min-width="88">
+        <el-table-column label="本周先做" min-width="204">
           <template #default="{ row }">
-            <span class="muted">{{ row.top_factor }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="absent" label="缺勤" width="60" align="right" />
-        <el-table-column prop="missed_hw" label="作业未交" width="78" align="right" />
-        <el-table-column prop="mid_avg" label="期中均分" width="78" align="right" />
-        <el-table-column label="" width="70">
-          <template #default>
-            <span class="tiny nowrap" style="color: var(--brand)">查看 →</span>
+            <div class="adv-cell">
+              <span class="pat-pill">{{ row.pattern_label }}</span>
+              <span class="adv-line">{{ row.advice }}</span>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -224,6 +261,7 @@ async function openLetter(type: "student" | "counselor") {
     :body="dialog.body"
     :citations="dialog.citations"
   />
+  </template>
 </template>
 
 <style scoped>
@@ -263,7 +301,11 @@ async function openLetter(type: "student" | "counselor") {
 .stu-cell {
   display: flex;
   flex-direction: column;
-  line-height: 1.35;
+  line-height: 1.4;
+}
+.fact-line {
+  color: var(--text-3, var(--text-2));
+  opacity: 0.85;
 }
 .nowrap {
   white-space: nowrap;
@@ -278,7 +320,7 @@ async function openLetter(type: "student" | "counselor") {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 2px;
-  border-bottom: 1px solid #f1f2f4;
+  border-bottom: 1px solid #f0e7d8;
   cursor: pointer;
 }
 .m-row:last-child {
@@ -304,5 +346,81 @@ async function openLetter(type: "student" | "counselor") {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+.m-adv {
+  color: var(--brand);
+}
+/* 名单上的"本周先做"：一句话建议 + 成因标签，不再是一列相同的话 */
+.adv-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pat-pill {
+  align-self: flex-start;
+  flex: none;
+  font-size: 10.5px;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
+  white-space: nowrap;
+}
+/* 名单要能扫，建议压到两行，完整内容点进抽屉看 */
+.adv-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+/* 风险分：分数 + 相对上学期的变化，两行放得下 */
+.risk-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.rd {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* 成绩走势：迷你折线 + 当前名次与变化 */
+.gt-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.gt-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--text-2);
+}
+.gt-meta b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.gt-delta {
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.gt-delta.bad {
+  color: var(--red);
+}
+.gt-delta.good {
+  color: var(--green);
+}
+.gt-delta.flat {
+  color: var(--muted);
 }
 </style>

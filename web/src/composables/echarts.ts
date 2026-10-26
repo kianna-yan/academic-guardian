@@ -1,10 +1,24 @@
 import * as echarts from "echarts/core";
-import { BarChart, PieChart } from "echarts/charts";
-import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
+import {
+  GridComponent,
+  LegendComponent,
+  MarkLineComponent,
+  TooltipComponent,
+} from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
 
-echarts.use([PieChart, BarChart, TooltipComponent, GridComponent, LegendComponent, CanvasRenderer]);
+echarts.use([
+  PieChart,
+  BarChart,
+  LineChart,
+  TooltipComponent,
+  GridComponent,
+  LegendComponent,
+  MarkLineComponent,
+  CanvasRenderer,
+]);
 
 /**
  * 轻量 ECharts 封装：按需注册图表类型，自动跟随容器尺寸变化。

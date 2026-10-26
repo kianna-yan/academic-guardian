@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { api } from "@/api/client";
+import { api, downloadDoc } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
 import FactorBars from "@/components/FactorBars.vue";
+import GradeTrend from "@/components/GradeTrend.vue";
 import RiskRing from "@/components/RiskRing.vue";
+import { useChatStore } from "@/stores/chat";
 import type { StudentDetail } from "@/types";
 
 const props = defineProps<{ modelValue: boolean; sid: string | null }>();
@@ -11,6 +13,8 @@ const emit = defineEmits<{
   (e: "update:modelValue", v: boolean): void;
   (e: "letter", type: "student" | "counselor"): void;
 }>();
+
+const chat = useChatStore();
 
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(false);
@@ -23,6 +27,13 @@ const visible = computed({
   get: () => props.modelValue,
   set: (v: boolean) => emit("update:modelValue", v),
 });
+
+/* 看完图直接追问：点名该生的走势，把图变成对话的开头 */
+function askTrend() {
+  if (!props.sid || !detail.value) return;
+  const name = detail.value.student.name;
+  chat.ask("counselor", props.sid, `${name} 的成绩走势说明什么？该重点关注哪门课？`);
+}
 
 async function load(sid: string) {
   loading.value = true;
@@ -85,6 +96,13 @@ async function addNote() {
             <b>{{ detail.risk.trend.delta > 0 ? "+" : "" }}{{ detail.risk.trend.delta.toFixed(0) }}</b>
             分（{{ detail.risk.trend.label }}）
           </div>
+          <!-- 文书导出：告知函/通知书/家长信，落成 Word 打印归档 -->
+          <div class="drawer-exports">
+            <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=counselor`)">谈话要点</button>
+            <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=student`)">告知函</button>
+            <button class="chip" @click="downloadDoc(`/api/export/notice/${sid}`)">通知书</button>
+            <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=parent`)">家长信</button>
+          </div>
         </div>
       </div>
 
@@ -112,8 +130,65 @@ async function addNote() {
         </li>
       </ul>
 
-      <h3 class="sec">建议先做的三件事</h3>
-      <ActionList :actions="detail.actions" :limit="3" :show-priority="false" />
+      <h3 class="sec">
+        成绩走势
+        <button
+          v-if="detail.grade_trend && detail.grade_trend.terms.length"
+          class="ask-ai"
+          @click="askTrend"
+        >问 AI：这条线说明什么？</button>
+      </h3>
+      <div v-if="detail.grade_trend && detail.grade_trend.terms.length" class="sec-body">
+        <GradeTrend :trend="detail.grade_trend" :height="196" />
+        <div v-if="detail.grade_trend.courses.length" class="mini-list">
+          <div
+            v-for="c in detail.grade_trend.courses.slice(0, 6)"
+            :key="c.code"
+            class="mini-row"
+          >
+            <span class="mini-name">{{ c.name }}</span>
+            <span class="mini-pts">
+              {{ c.points.map((p) => p.score).join(" → ") }}
+            </span>
+            <span class="mini-d" :class="c.trend">
+              {{ c.delta > 0 ? "+" : "" }}{{ c.delta }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="tiny muted">暂无成绩历史</div>
+
+      <h3 class="sec">这次要解决的是什么</h3>
+      <div v-if="detail.advice" class="dx">
+          <span class="dx-pill">{{ detail.advice.pattern_label }}</span>
+          <p class="dx-note">{{ detail.advice.diagnosis }}</p>
+          <ul class="dx-ev">
+            <li v-for="e in detail.advice.evidence" :key="e">{{ e }}</li>
+          </ul>
+          <p class="dx-tip"><b>谈话切入：</b>{{ detail.advice.counselor_tip }}</p>
+          <ol v-if="detail.advice.first_steps.length" class="dx-steps">
+            <li v-for="s in detail.advice.first_steps" :key="s">{{ s }}</li>
+          </ol>
+      </div>
+
+      <h3 class="sec">可以立刻安排的事</h3>
+      <ActionList :actions="detail.actions" :limit="3" :show-priority="true" />
+
+      <template v-if="detail.advice">
+        <h3 class="sec">可以转介的资源</h3>
+        <div class="sup-list">
+          <div v-for="s in detail.advice.support" :key="s.kind" class="sup-item">
+            <b>{{ s.kind }}</b>
+            <span class="tiny muted">{{ s.text }}</span>
+            <span v-if="s.contact" class="tiny sup-contact">{{ s.contact }}</span>
+          </div>
+        </div>
+
+        <h3 class="sec">复查节点</h3>
+        <div class="tiny watch">
+          <b>{{ detail.advice.watch.when }}</b> · {{ detail.advice.watch.what }}
+        </div>
+      </template>
 
       <h3 class="sec">跟踪记录</h3>
       <div v-if="detail.interventions.length" class="iv-list">
@@ -166,6 +241,23 @@ async function addNote() {
 .sec {
   font-size: 13.5px;
   margin: 18px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ask-ai {
+  border: 1px solid #f0d9b5;
+  background: #fdf1de;
+  color: #4338ca;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ask-ai:hover {
+  background: #f8e8cc;
 }
 .facts {
   margin: 0;
@@ -194,10 +286,135 @@ async function addNote() {
   gap: 8px;
   margin-top: 10px;
   align-items: center;
-}
-.drawer-foot {
+}.drawer-foot {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* 归因卡片：先说性质，再摆证据 */
+.dx {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brand);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--brand) 4%, transparent);
+}
+.dx-pill {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  margin-bottom: 6px;
+}
+.dx-note {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-1);
+}
+.dx-ev {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.dx-ev li {
+  margin: 3px 0;
+  line-height: 1.6;
+}
+.dx-tip {
+  margin: 9px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+.dx-steps {
+  margin: 8px 0 0;
+  padding-left: 17px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+.sup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}.sup-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.sup-contact {
+  color: var(--brand);
+  margin-left: auto;
+}
+.watch {
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px dashed var(--line);
+}
+/* 成绩走势：上面图，下面每门课的分数序列 */
+.sec-body {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+}
+.mini-list {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mini-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 42px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11.5px;
+}
+.mini-name {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-pts {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mini-d {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mini-d.up {
+  color: var(--green);
+}
+.mini-d.down {
+  color: var(--red);
+}
+.mini-d.flat {
+  color: var(--muted);
+}
+/* 文书导出胶囊：点名下载，打印归档 */
+.drawer-exports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.drawer-exports .chip {
+  cursor: pointer;
 }
 </style>

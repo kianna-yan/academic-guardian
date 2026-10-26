@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute } from "vue-router";
 import { useAppStore } from "@/stores/app";
+import { useAuthStore } from "@/stores/auth";
 
 const app = useAppStore();
-const route = useRoute();
+const auth = useAuthStore();
 
-const roles = computed(() => app.meta?.roles ?? []);
 const term = computed(() => app.meta?.term ?? "—");
 const week = computed(() => app.meta?.week ?? 0);
 const updated = computed(() => app.meta?.updated_at ?? "");
 const llm = computed(() => app.meta?.llm);
+const roleMeta = computed(() => app.meta?.roles.find((r) => r.key === auth.profile?.role));
+const roleLabel = computed(
+  () =>
+    ({ student: "学生端", counselor: "辅导员端", admin: "教务端", parent: "家长端" } as Record<string, string>)[
+      auth.profile?.role || ""
+    ] || "",
+);
 </script>
 
 <template>
@@ -23,18 +29,16 @@ const llm = computed(() => app.meta?.llm);
       </div>
     </div>
 
-    <nav class="role-nav">
-      <router-link
-        v-for="r in roles"
-        :key="r.key"
-        :to="{ name: r.key, query: route.query }"
-        class="role-btn"
-        :class="{ active: route.name === r.key }"
-      >
-        <span>{{ r.name }}</span>
-        <em>{{ r.desc }}</em>
-      </router-link>
-    </nav>
+    <!-- 一个账号只属于一个端，所以这里不再做端切换，只显示当前身份 -->
+    <div class="current-role">
+      <div class="current-role-head">
+        <span>{{ roleLabel }}</span>
+        <em v-if="auth.mustChange">初始密码</em>
+      </div>
+      <b>{{ auth.profile?.name }}</b>
+      <small>{{ auth.profile?.account }}<template v-if="auth.profile?.class_name"> · {{ auth.profile?.class_name }}</template></small>
+      <p v-if="roleMeta" class="current-role-desc">{{ roleMeta.desc }}</p>
+    </div>
 
     <div class="side-block">
       <div class="side-label">当前学期</div>
@@ -62,3 +66,50 @@ const llm = computed(() => app.meta?.llm);
     </div>
   </aside>
 </template>
+
+<style scoped>
+.current-role {
+  margin: 2px 2px 16px;
+  padding: 12px;
+  border: 1px solid rgba(214, 187, 152, 0.28);
+  border-radius: 10px;
+  background: rgba(214, 187, 152, 0.10);
+}
+.current-role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.current-role-head span {
+  font-size: 11.5px;
+  color: #b09b85;
+  letter-spacing: 0.04em;
+}
+.current-role-head em {
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #78350f;
+  color: #fcd34d;
+}
+.current-role b {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  color: #eadfcd;
+}
+.current-role small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #b09b85;
+}
+.current-role-desc {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #b09b85;
+}
+</style>

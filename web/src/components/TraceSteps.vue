@@ -11,6 +11,9 @@ const LABEL: Record<string, string> = {
   retrieve_policy: "检索校规库",
   roster: "查风险名单",
   campus_overview: "统计全校数据",
+  grade_trend: "拉成绩走势",
+  counselor_brief: "生成谈话要点",
+  record_intervention: "写入干预台账",
   llm_polish: "大模型润色",
 };
 
@@ -41,7 +44,7 @@ const steps = computed(() =>
 <style scoped>
 .trace-step em {
   font-style: normal;
-  color: #94a3b8;
+  color: #b09b85;
   font-size: 10px;
   margin-left: 2px;
 }

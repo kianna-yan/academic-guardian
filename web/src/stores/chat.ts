@@ -9,6 +9,8 @@ export interface ChatMessage {
   text: string;
   trace: ChatTrace[];
   citations: Citation[];
+  /** 思考链：实时推过来的推理过程，pending 时也在长 */
+  thoughts: string[];
   intent?: string;
   elapsed?: number;
   pending?: boolean;
@@ -30,8 +32,8 @@ export const DEFAULT_SUGGEST: Record<Role, string[]> = {
 };
 
 export const useChatStore = defineStore("chat", () => {
-  // 宽屏默认展开，窄屏（手机/小笔记本）默认收起，避免一进来就盖住正文
-  const open = ref(typeof window !== "undefined" ? window.innerWidth >= 1080 : true);
+  /** 对话是主入口：chat = 整页 AI 问答（默认），dash = 数据看板 */
+  const homeMode = ref<"chat" | "dash">("chat");
   const messages = ref<ChatMessage[]>([]);
   const suggestions = ref<string[]>([]);
   const streaming = ref(false);
@@ -50,7 +52,14 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function greeting(role: Role) {
-    return { id: ++seq, from: "assistant" as const, text: GREETING[role], trace: [], citations: [] };
+    return {
+      id: ++seq,
+      from: "assistant" as const,
+      text: GREETING[role],
+      trace: [],
+      citations: [],
+      thoughts: [],
+    };
   }
 
   /** 切换端时重置会话，避免把学生端的上下文带进家长端 */
@@ -59,6 +68,7 @@ export const useChatStore = defineStore("chat", () => {
     currentRole.value = role;
     messages.value = [greeting(role)];
     suggestions.value = [...DEFAULT_SUGGEST[role]];
+    homeMode.value = "chat";
   }
 
   function ensure(role: Role) {
@@ -70,13 +80,14 @@ export const useChatStore = defineStore("chat", () => {
     if (!content || streaming.value) return;
     ensure(role);
 
-    messages.value.push({ id: ++seq, from: "user", text: content, trace: [], citations: [] });
+    messages.value.push({ id: ++seq, from: "user", text: content, trace: [], citations: [], thoughts: [] });
     messages.value.push({
       id: ++seq,
       from: "assistant",
       text: "",
       trace: [],
       citations: [],
+      thoughts: [],
       pending: true,
     });
 
@@ -90,6 +101,9 @@ export const useChatStore = defineStore("chat", () => {
         switch (ev.type) {
           case "meta":
             reply.intent = ev.intent;
+            break;
+          case "thought":
+            reply.thoughts.push(ev.text);
             break;
           case "tool":
             reply.trace.push(ev.trace);
@@ -122,5 +136,11 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  return { open, messages, suggestions, streaming, send, reset, ensure, abort };
+  /** 页面上任何位置的「问 AI」都走这里：回到整页对话并直接发问 */
+  function ask(role: Role, sid: string | null, question: string) {
+    homeMode.value = "chat";
+    void send(role, sid, question);
+  }
+
+  return { homeMode, messages, suggestions, streaming, send, reset, ensure, abort, ask };
 });
