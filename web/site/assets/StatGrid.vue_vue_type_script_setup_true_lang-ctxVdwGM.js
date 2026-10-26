@@ -1,1 +1,0 @@
-import{k as r,v as a,F as o,z as i,q as t,D as c,x as s,y as n}from"./element-Vf_vm98f.js";const m={class:"stats"},d=r({__name:"StatGrid",props:{items:{}},setup(l){return(p,u)=>(t(),a("div",m,[(t(!0),a(o,null,i(l.items,e=>(t(),a("div",{key:e.label,class:c(["stat",e.tone])},[s("b",null,n(e.value),1),s("span",null,n(e.label),1)],2))),128))]))}});export{d as _};

@@ -46,10 +46,44 @@ async function shot(name) {
   console.log("shot:", name);
 }
 
+/* ---------- 登录：四个端各自独立账号 ---------- */
+const STAFF = {
+  counselor: { account: "2024014589", password: "1111" },
+  admin: { account: "1234567899", password: "2222" },
+};
+
+async function loginAs(role, account, password) {
+  const res = await page.evaluate(
+    async (body) => {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, data: await r.json().catch(() => ({})) };
+    },
+    { role, account, password },
+  );
+  if (!res.data?.token) throw new Error(`登录失败 ${role}: ${JSON.stringify(res.data)}`);
+  await page.evaluate((t) => localStorage.setItem("ag.token", t), res.data.token);
+  return res.data.profile;
+}
+
+// 学号从 meta 取，避免把演示学号写死在脚本里
+await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+const DEMO = await page.evaluate(async () => (await fetch("/api/meta")).json());
+const STUDENT = { account: DEMO.demo.student, password: "0000" };
+await loginAs("counselor", STAFF.counselor.account, STAFF.counselor.password);
+
 /* ---------- 辅导员端：名单 → 抽屉 → 谈话要点 ---------- */
 step("counselor");
 await page.goto(`${BASE}/counselor`, { waitUntil: "networkidle2" });
-await page.waitForSelector(".el-table__row");
+// 对话即首页：先进整页对话，再按键去预警名单看板
+await page.waitForSelector(".chat-home", { timeout: 15000 });
+await sleep(600);
+await shot("ui_counselor_chat");
+await page.click(".ch-go-dash");
+await page.waitForSelector(".el-table__row", { timeout: 15000 });
 await sleep(400);
 await shot("ui_counselor");
 
@@ -83,21 +117,24 @@ step("drawer-close");
 await page.evaluate(() => document.querySelector(".el-drawer__close-btn")?.click());
 await sleep(400);
 
-/* ---------- 学生端：流式对话 ---------- */
+/* ---------- 学生端：整页对话流式输出 ---------- */
+step("student-login");
+await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+await loginAs("student", STUDENT.account, STUDENT.password);
 await page.goto(`${BASE}/student`, { waitUntil: "networkidle2" });
-await page.waitForSelector(".chat-form input");
+await page.waitForSelector(".ch-draft input");
 step("chat-stream");
-await page.type(".chat-form input", "我的风险分为什么这么高");
-await page.click(".chat-form button");
+await page.type(".ch-draft input", "我的风险分为什么这么高");
+await page.click(".ch-draft button");
 await page.waitForSelector(".trace-step");
 await sleep(150);
 const len1 = await page.evaluate(
-  () => document.querySelector(".chat-body .msg:last-child .bubble")?.innerText.length ?? 0,
+  () => document.querySelector(".chat-stream .msg:last-child .bubble")?.innerText.length ?? 0,
 );
 await shot("ui_chat_streaming");
 await sleep(450);
 const len2 = await page.evaluate(
-  () => document.querySelector(".chat-body .msg:last-child .bubble")?.innerText.length ?? 0,
+  () => document.querySelector(".chat-stream .msg:last-child .bubble")?.innerText.length ?? 0,
 );
 await page.waitForSelector(".trace-total", { timeout: 20000 });
 await sleep(400);
@@ -106,7 +143,7 @@ console.log(`stream growth: ${len1} -> ${len2} chars`);
 
 // 引用与轨迹是否都渲染出来
 const chatInfo = await page.evaluate(() => {
-  const last = [...document.querySelectorAll(".chat-body .msg")].pop();
+  const last = [...document.querySelectorAll(".chat-stream .msg")].pop();
   return {
     text: last?.querySelector(".bubble")?.innerText?.slice(0, 80) ?? "",
     steps: [...last.querySelectorAll(".trace-step")].map((e) => e.textContent.trim()),
@@ -121,9 +158,19 @@ step("mobile");
 await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
 for (const role of ["student", "counselor", "admin"]) {
   step("mobile-" + role);
+  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  if (role === "student") await loginAs("student", STUDENT.account, STUDENT.password);
+  else await loginAs(role, STAFF[role].account, STAFF[role].password);
   await page.goto(`${BASE}/${role}`, { waitUntil: "networkidle2" });
   await sleep(700);
-  await shot(`ui_m_${role}`);
+  // 手机上进页面也是整页对话，再点按键看手机版看板
+  await shot(`ui_m_${role}_chat`);
+  const hasDash = await page.$(".ch-go-dash");
+  if (hasDash) {
+    await hasDash.click();
+    await sleep(900);
+    await shot(`ui_m_${role}`);
+  }
 }
 const overflow = await page.evaluate(() => ({
   scrollW: document.documentElement.scrollWidth,
