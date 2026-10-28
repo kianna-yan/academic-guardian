@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
 import ChatHome from "@/components/ChatHome.vue";

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage } from "element-plus/es/components/message/index";
 import { useAuthStore } from "@/stores/auth";
 
 const props = defineProps<{ modelValue: boolean }>();

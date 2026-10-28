@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessageBox } from "element-plus";
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useAuthStore } from "@/stores/auth";
+import NoticeBell from "@/components/NoticeBell.vue";
 
 const emit = defineEmits<{ (e: "change-password"): void }>();
 
@@ -43,6 +44,7 @@ async function logout() {
     </div>
 
     <div class="topbar-right">
+      <NoticeBell />
       <div class="who">
         <div class="avatar">{{ initial }}</div>
         <div class="who-text">

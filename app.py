@@ -1,6 +1,6 @@
 """学业护航 · FastAPI 服务入口。
 
-前端为 Vue 3 + Vite 工程（web/），构建产物在 web/site，由本服务托管。
+前端为 Vue 3 + Vite 工程（web/），构建产物在 web/dist，由本服务托管。
 启动： python -m uvicorn app:app --port 8600
 """
 from __future__ import annotations
@@ -18,12 +18,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from engine import accounts, curriculum, data, exporter, llm, rag, report as report_mod, trend
+from engine import accounts, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
+from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
 from engine.memory import ConversationMemory
+from engine.notifications import APPEALS, NOTIFS, TODOS
 from engine.risk import DEFAULT_CONFIG, RiskEngine
 
 BASE = Path(__file__).resolve().parent
@@ -31,6 +34,12 @@ DIST = BASE / "web" / "site"
 LEGACY = BASE / "static"
 STARTED_AT = time.time()
 app = FastAPI(title="学业护航 Academic Guardian")
+
+# 传输压缩：前端产物是 1.6 MB 未压缩的 JS，gzip 后约 400 KB。
+# Starlette 的 GZip 默认把 text/event-stream 排除在外，所以 /api/chat/stream
+# 的逐 token 推送不会被缓冲，打字机效果不受影响；Partial Content（断点续传）
+# 与已带 Content-Encoding 的响应也会自动跳过。
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 DATASET = data.db()
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
@@ -44,6 +53,8 @@ CURRICULUM = curriculum.Curriculum()
 CURRICULUM.apply(DATASET)
 # 会话记忆：多轮对话的"他 / 第 N 个"靠它消解；按账号隔离
 MEMORY = ConversationMemory()
+# 消息中心：启动时把数据集里已发生的旷课/缺交/预警播种成各端的通知与待办
+notifications.seed(ENGINE)
 
 
 def _record_intervention(sid: str, title: str, note: str, status: str = "已完成") -> dict:
@@ -250,6 +261,22 @@ class PasswordIn(BaseModel):
 
 class ImportIn(BaseModel):
     text: str = ""
+
+
+class AppealIn(BaseModel):
+    kind: str = "attendance"       # attendance 考勤 | homework 作业
+    record_id: str = ""
+    course: str = ""
+    reason: str = ""
+
+
+class AppealResolveIn(BaseModel):
+    action: str = "accept"         # accept 同意更正 | reject 维持原记录
+    reply: str = ""
+
+
+class ReadIn(BaseModel):
+    ids: list[str] = []
 
 
 def _scope(profile: dict, body: ChatIn) -> tuple[str, str | None]:
@@ -469,6 +496,116 @@ def agent_reset(request: Request):
     from engine.memory import memory_key
     MEMORY.clear(memory_key(request.state.profile))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 消息中心：四端通知 / 待办 / 学生异议闭环
+# 学生端收到：旷课、缺交、预警、异议回执；导员端收到：学生异议、约谈提醒。
+# 每端只看得到自己的消息（role:account 隔离），互不串台。
+# ---------------------------------------------------------------------------
+def _nkey(profile: dict) -> tuple[str, str]:
+    return profile.get("role") or "student", profile.get("account") or "anon"
+
+
+_KIND_LABEL = {"attendance": "旷课记录", "homework": "作业缺交记录"}
+
+
+@app.get("/api/notifications")
+def notifications_get(request: Request):
+    """本账号的未读通知 + 待办 +（学生端）自己的异议进度。"""
+    p = request.state.profile
+    role, account = _nkey(p)
+    unread = NOTIFS.unread(role, account)
+    todos = TODOS.items(role, account)
+    out: dict = {
+        "unread": unread,
+        "todos": todos,
+        "counts": {"unread": len(unread), "todo": sum(1 for t in todos if not t["done"])},
+    }
+    if p.get("role") == "student" and p.get("sid"):
+        mine = APPEALS.by_student(p["sid"])
+        out["appeals"] = mine
+        out["counts"]["appeals_pending"] = sum(1 for a in mine if a["status"] == "pending")
+    return out
+
+
+@app.post("/api/notifications/read")
+def notifications_read(body: ReadIn, request: Request):
+    role, account = _nkey(request.state.profile)
+    n = NOTIFS.mark_read(role, account, body.ids)
+    return {"ok": True, "marked": n}
+
+
+@app.post("/api/todos/{tid}/finish")
+def todo_finish(tid: str, request: Request):
+    """勾掉一条待办（本账号自己的）。"""
+    p = request.state.profile
+    role, account = _nkey(p)
+    row = TODOS.finish(role, account, tid)
+    if not row:
+        raise HTTPException(404, "待办不存在")
+    return {"ok": True, "todo": row}
+
+
+@app.post("/api/appeals")
+def appeal_submit(body: AppealIn, request: Request):
+    """学生对某条考勤/作业记录提出异议 → 实时生成导员端通知 + 待办。"""
+    p = request.state.profile
+    if p.get("role") != "student":
+        raise HTTPException(403, "只有学生端可以提交异议")
+    reason = (body.reason or "").strip()
+    if len(reason) < 5:
+        raise HTTPException(400, "请填写异议理由（至少 5 个字），方便老师核实")
+    label = _KIND_LABEL.get(body.kind, "考勤记录")
+    row = APPEALS.submit(p, body.kind, body.record_id, body.course, reason)
+    NOTIFS.push("counselor", COUNSELOR_ACCOUNT, "appeal_new",
+                f"{p.get('name', '学生')} 对{label}提出异议",
+                f"《{body.course}》（{body.record_id}）：{reason[:60]}",
+                {"appeal_id": row["id"]})
+    TODOS.push("counselor", COUNSELOR_ACCOUNT, "appeal",
+               f"处理 {p.get('name', '学生')} 的{label}异议",
+               f"《{body.course}》：{reason[:50]}——在消息面板可直接同意或驳回。",
+               {"appeal_id": row["id"]})
+    return {"ok": True, "appeal": row}
+
+
+@app.get("/api/appeals")
+def appeal_list(request: Request):
+    """学生看自己的异议进度；导员看名下学生的异议；教务看全部。"""
+    p = request.state.profile
+    role = p.get("role")
+    if role == "student":
+        rows = APPEALS.by_student(p.get("sid") or "")
+    elif role == "admin":
+        rows = APPEALS.all()
+    else:
+        rows = APPEALS.by_advisor(p.get("name") or "刘畅")
+    return {"items": rows}
+
+
+@app.post("/api/appeals/{aid}/resolve")
+def appeal_resolve(aid: str, body: AppealResolveIn, request: Request):
+    """导员/教务裁定异议 → 学生端收到回执通知，导员端对应待办自动闭环。"""
+    p = request.state.profile
+    if p.get("role") not in ("counselor", "admin"):
+        raise HTTPException(403, "只有辅导员或教务可以处理异议")
+    row = APPEALS.get(aid)
+    if not row:
+        raise HTTPException(404, "异议不存在")
+    if row["status"] != "pending":
+        raise HTTPException(400, "这条异议已处理过了")
+    reply = (body.reply or "").strip()
+    row = APPEALS.resolve(aid, body.action, reply)
+    verdict = "已核实，将更正记录" if row["status"] == "accepted" else "核实后维持原记录"
+    NOTIFS.push("student", row["sid"], "appeal_reply",
+                f"你的{ _KIND_LABEL.get(row['kind'], '记录')}异议有了结果",
+                f"《{row['course']}》：{verdict}。{reply}".strip(),
+                {"appeal_id": aid})
+    TODOS.push("student", row["sid"], "appeal", "查看异议处理结果",
+               f"《{row['course']}》的异议{verdict}，点开消息中心看老师回复。",
+               {"appeal_id": aid})
+    TODOS.close_by_meta("counselor", COUNSELOR_ACCOUNT, {"appeal_id": aid})
+    return {"ok": True, "appeal": row}
 
 
 # ---------------------------------------------------------------------------

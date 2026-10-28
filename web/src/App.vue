@@ -1,29 +1,61 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { ElMessage } from "element-plus";
+import zhCn from "element-plus/es/locale/lang/zh-cn";
+import { ElMessage } from "element-plus/es/components/message/index";
+import { ElNotification } from "element-plus/es/components/notification/index";
 import PasswordDialog from "@/components/PasswordDialog.vue";
 import SideBar from "@/components/SideBar.vue";
 import TopBar from "@/components/TopBar.vue";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
+import { useNoticeStore } from "@/stores/notices";
 import type { Role } from "@/types";
 
 const app = useAppStore();
 const auth = useAuthStore();
 const chat = useChatStore();
+const notices = useNoticeStore();
 const route = useRoute();
 const pwdOpen = ref(false);
 
 const isLogin = computed(() => route.name === "login");
 const role = computed<Role>(() => auth.profile?.role ?? "student");
 
-// 切端时重置对话，避免把上一个身份的上下文带进来
+// 切端 / 换账号时都重置对话面板：角色和账号任一变化都要换会话，
+// 否则同角色换账号（学生 A 退出 → 学生 B 登录）会短暂看到上一人的消息
 watch(
-  () => role.value,
-  (r) => {
-    if (!isLogin.value) chat.ensure(r);
+  () => `${role.value}:${auth.profile?.account ?? ""}`,
+  (key) => {
+    if (!isLogin.value) chat.ensure(key.split(":")[0] as Role);
+  },
+  { immediate: true },
+);
+
+// ---- 消息中心：登录后开始轮询，退出即停；新通知到 → 右下角弹窗 ----
+let stopArrive: (() => void) | null = null;
+watch(
+  () => auth.profile?.account,
+  (acc) => {
+    if (acc && !isLogin.value) {
+      notices.start();
+      stopArrive?.();
+      stopArrive = notices.onArrive((items) => {
+        for (const n of items.slice(0, 3)) {
+          ElNotification({
+            title: n.title,
+            message: n.text,
+            type: n.kind === "appeal_new" || n.kind === "absent" ? "warning" : "info",
+            duration: 6000,
+          });
+        }
+      });
+    } else {
+      notices.stop();
+      stopArrive?.();
+      stopArrive = null;
+    }
   },
   { immediate: true },
 );
@@ -41,6 +73,7 @@ watch(
 </script>
 
 <template>
+  <el-config-provider :locale="zhCn">
   <div v-if="isLogin" class="auth-page">
     <router-view />
   </div>
@@ -69,6 +102,7 @@ watch(
 
     <PasswordDialog v-model="pwdOpen" />
   </div>
+  </el-config-provider>
 </template>
 
 <style scoped>

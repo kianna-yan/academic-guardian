@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
 import ChatHome from "@/components/ChatHome.vue";
 import DashNav from "@/components/DashNav.vue";
@@ -217,7 +217,9 @@ async function openLetter(type: "student" | "counselor") {
         </el-table-column>
         <el-table-column label="成绩走势" width="112">
           <template #default="{ row }">
-            <div class="gt-cell" :title="gtTitle(row)">
+            <!-- el-table 的作用域插槽给的是 DefaultRow（索引签名），
+                 不是我们声明的 RosterRow，因此需要一次显式断言才能通过类型检查 -->
+            <div class="gt-cell" :title="gtTitle(row as RosterRow)">
               <TrendSpark
                 :points="row.trend_points || []"
                 :width="88"

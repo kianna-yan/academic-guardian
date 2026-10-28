@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage } from "element-plus/es/components/message/index";
 import { api } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
 import ChatHome from "@/components/ChatHome.vue";
@@ -20,7 +20,24 @@ const chat = useChatStore();
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(true);
 const error = ref("");
-const appeal = reactive({ open: false, text: "", sending: false });
+const appeal = reactive({
+  open: false,
+  text: "",
+  sending: false,
+  kind: "attendance" as "attendance" | "homework",
+  record_id: "",
+  course: "",
+});
+
+/** 对某条考勤/作业记录发起异议：预填课程与记录，弹开表单 */
+function openAppeal(kind: "attendance" | "homework", record: { id?: string; date?: string; period?: string }, course: string) {
+  appeal.kind = kind;
+  appeal.course = course;
+  appeal.record_id = record.id || (record.date && record.period ? `${course}-${record.date}-${record.period}` : course);
+  appeal.text = "";
+  appeal.open = true;
+  document.querySelector(".appeal-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 // 学号来自登录身份，不再读演示数据
 const sid = computed(() => auth.profile?.sid || "");
@@ -139,17 +156,18 @@ async function submitAppeal() {
   if (!appeal.text.trim() || !sid.value) return;
   appeal.sending = true;
   try {
-    await api.addIntervention(sid.value, {
-      title: `复核申请：${appeal.text.trim().slice(0, 20)}`,
-      note: appeal.text.trim(),
-      status: "待人工复核",
+    await api.submitAppeal({
+      kind: appeal.kind,
+      record_id: appeal.record_id,
+      course: appeal.course,
+      reason: appeal.text.trim(),
     });
     appeal.text = "";
     appeal.open = false;
-    ElMessage.success("已提交，辅导员会在 3 个工作日内人工核实");
+    ElMessage.success("异议已提交，辅导员会尽快核实并回执（可在消息中心看进度）");
     await load();
   } catch (e: any) {
-    ElMessage.error(e?.message || "提交失败");
+    ElMessage.error(e?.response?.data?.detail || e?.message || "提交失败");
   } finally {
     appeal.sending = false;
   }
@@ -415,7 +433,12 @@ async function submitAppeal() {
             <b>{{ a.course }}</b>
             <span class="tiny muted">{{ a.note || "正常到课" }}</span>
           </div>
-          <span class="pill" :class="a.status">{{ ATTEND_LABEL[a.status] }}</span>
+          <div class="rec-side">
+            <span class="pill" :class="a.status">{{ ATTEND_LABEL[a.status] }}</span>
+            <button v-if="a.status !== 'present'" class="appeal-btn" @click="openAppeal('attendance', a, a.course)">
+              异议
+            </button>
+          </div>
         </div>
       </div>
       <p class="tiny muted note-line">
@@ -445,7 +468,12 @@ async function submitAppeal() {
               <template v-else> · 已于 {{ h.submitted_at.slice(5, 16) }} 提交</template>
             </span>
           </div>
-          <span class="pill" :class="h.status">{{ HW_LABEL[h.status] }}</span>
+          <div class="rec-side">
+            <span class="pill" :class="h.status">{{ HW_LABEL[h.status] }}</span>
+            <button v-if="h.status !== 'submitted'" class="appeal-btn" @click="openAppeal('homework', h, h.course)">
+              异议
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -463,6 +491,10 @@ async function submitAppeal() {
         <button class="btn" @click="appeal.open = true">提交复核申请</button>
       </div>
       <div v-else class="appeal-form">
+        <p v-if="appeal.course" class="tiny appeal-target">
+          针对：{{ appeal.kind === "homework" ? "作业" : "考勤" }}记录 · {{ appeal.course }}
+          <span v-if="appeal.record_id && appeal.record_id !== appeal.course" class="muted">（{{ appeal.record_id }}）</span>
+        </p>
         <el-input
           v-model="appeal.text"
           type="textarea"
@@ -664,6 +696,32 @@ async function submitAppeal() {
   border-left: 3px solid transparent;
   border-radius: 10px;
   min-width: 0;
+}
+.rec-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.appeal-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.appeal-btn:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.appeal-target {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 .rec.absent {
   border-left-color: var(--red, #dc2626);

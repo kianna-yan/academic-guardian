@@ -2,6 +2,7 @@ import axios, { type AxiosRequestConfig } from "axios";
 import type {
   AccountRow,
   AgentBriefing,
+  AppealItem,
   AuthProfile,
   ChatAnswer,
   ChatTrace,
@@ -13,10 +14,13 @@ import type {
   Letter,
   LoginResult,
   Meta,
+  NoticeItem,
+  NoticePayload,
   Overview,
   Role,
   RosterRow,
   StudentDetail,
+  TodoItem,
 } from "@/types";
 
 /* ------------------------------------------------------------------
@@ -164,6 +168,15 @@ export const api = {
     }>("/agent/daily-report"),
   curriculum: () => get<CurriculumPayload>("/curriculum"),
   importCurriculum: (text: string) => post<CurriculumImportResult>("/curriculum/import", { text }),
+  /* ---- 消息中心：通知 / 待办 / 异议 ---- */
+  notifications: () => get<NoticePayload>("/notifications"),
+  markNoticesRead: (ids: string[]) => post<{ ok: boolean; marked: number }>("/notifications/read", { ids }),
+  finishTodo: (id: string) => post<{ ok: boolean; todo: TodoItem }>(`/todos/${id}/finish`, {}),
+  submitAppeal: (body: { kind: "attendance" | "homework"; record_id: string; course: string; reason: string }) =>
+    post<{ ok: boolean; appeal: AppealItem }>("/appeals", body),
+  appeals: () => get<{ items: AppealItem[] }>("/appeals"),
+  resolveAppeal: (id: string, body: { action: "accept" | "reject"; reply: string }) =>
+    post<{ ok: boolean; appeal: AppealItem }>(`/appeals/${id}/resolve`, body),
 };
 
 /* ------------------------------------------------------------------

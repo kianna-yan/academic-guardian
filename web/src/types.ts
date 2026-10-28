@@ -427,3 +427,50 @@ export interface AgentBriefing {
   points: { label: string; text: string; tone: string }[];
   asks: string[];
 }
+
+/* ------------------------------------------------------------------
+ * 消息中心：四端通知 / 待办 / 学生异议
+ * ---------------------------------------------------------------- */
+export type NoticeKind = "absent" | "homework" | "risk" | "appeal_new" | "appeal_reply";
+
+export interface NoticeItem {
+  id: string;
+  kind: NoticeKind;
+  title: string;
+  text: string;
+  ts: string;
+  read: boolean;
+  meta: Record<string, string>;
+}
+
+export interface TodoItem {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  ts: string;
+  done: boolean;
+  meta: Record<string, string>;
+}
+
+export interface AppealItem {
+  id: string;
+  sid: string;
+  name: string;
+  class_name: string;
+  advisor: string;
+  kind: "attendance" | "homework";
+  record_id: string;
+  course: string;
+  reason: string;
+  ts: string;
+  status: "pending" | "accepted" | "rejected";
+  reply: string;
+}
+
+export interface NoticePayload {
+  unread: NoticeItem[];
+  todos: TodoItem[];
+  counts: { unread: number; todo: number; appeals_pending?: number };
+  appeals?: AppealItem[];
+}
