@@ -1,6 +1,6 @@
 """学业护航 · FastAPI 服务入口。
 
-前端为 Vue 3 + Vite 工程（web/），构建产物在 web/dist，由本服务托管。
+前端为 Vue 3 + Vite 工程（web/），构建产物在 web/site，由本服务托管。
 启动： python -m uvicorn app:app --port 8600
 """
 from __future__ import annotations

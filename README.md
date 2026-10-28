@@ -30,7 +30,7 @@
 | 组件与图表 | Element Plus 2.9（表格 / 抽屉 / 弹窗 / 表单）、ECharts 5.5（按需引入 Pie + Bar） |
 | 通信 | axios（拦截器统一附加 token）+ 原生 `fetch` 读流（SSE over POST） |
 | 鉴权 | 自建轻量账号体系：PBKDF2-SHA256 密码哈希 + HMAC 签名 token + 中间件按角色拦截 |
-| 服务 | Python 3 + FastAPI，30 个 REST 接口 + SSE 流式响应，单容器托管前端产物 |
+| 服务 | Python 3 + FastAPI，39 个 REST 接口 + SSE 流式响应，单容器托管前端产物 |
 | 传输 | GZip 压缩静态资源（814 KB → 255 KB）；SSE 走 chunked 不压缩，保证逐 token 推送 |
 | 构建 | Vite 6 代码分割（路由懒加载 + 按 node_modules 分组），Element Plus 按需引入 |
 | 检索 | 自实现 BM25（中文按字二元切分），零外部依赖 |
@@ -247,7 +247,7 @@ LLM_MODEL=deepseek-chat
 
 ```
 .
-├── app.py                  FastAPI 入口：30 个接口 + SSE + 静态托管 + 鉴权中间件
+├── app.py                  FastAPI 入口：39 个接口 + SSE + 静态托管 + 鉴权中间件
 ├── engine/
 │   ├── data.py             学情模拟数据（240 名学生 / 6 门课 / 逐日考勤与作业明细 / 教师档案）
 │   ├── accounts.py         账号库：四端账号、PBKDF2 密码、HMAC token、批量开通
