@@ -14,9 +14,98 @@
       content="把「期末数挂科」变成「期中看见风险」：多因素风险模型 + 一校一规校规库 + 可解释预警与干预闭环。"
     />
     <meta property="og:type" content="website" />
+    <!-- 首屏骨架：Vue 挂载前就画出结构，避免「白屏一闪」。
+         mount 时 Vue 会清空 #app 内容，这段骨架自动被替换掉，不需要额外卸载逻辑。 -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #faf5ee;
+      }
+      .boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background: #faf5ee;
+        color: #3b2e24;
+        font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      .boot-ring {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: 3px solid #eadfcd;
+        border-top-color: #c2410c;
+        animation: boot-spin 0.85s linear infinite;
+      }
+      .boot-title {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .boot-sub {
+        font-size: 13px;
+        color: #8e7a66;
+        margin-top: -10px;
+      }
+      .boot-track {
+        width: 168px;
+        height: 3px;
+        border-radius: 2px;
+        background: #eadfcd;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+      .boot-bar {
+        width: 40%;
+        height: 100%;
+        border-radius: 2px;
+        background: #c2410c;
+        animation: boot-slide 1.25s ease-in-out infinite;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes boot-slide {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(360%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-ring,
+        .boot-bar {
+          animation: none;
+        }
+        .boot-bar {
+          width: 100%;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot" role="status" aria-live="polite">
+        <div class="boot-ring" aria-hidden="true"></div>
+        <div class="boot-title">学业护航</div>
+        <div class="boot-sub">正在载入学情数据…</div>
+        <div class="boot-track" aria-hidden="true"><div class="boot-bar"></div></div>
+      </div>
+    </div>
+    <noscript>
+      <div style="max-width: 560px; margin: 12vh auto; padding: 24px; background: #fff; border: 1px solid #eadfcd; border-radius: 12px; color: #3b2e24; font-family: -apple-system, 'Microsoft YaHei', sans-serif">
+        <h1 style="font-size: 18px; margin: 0 0 10px">需要启用 JavaScript</h1>
+        <p style="margin: 0; color: #5d4b3a; line-height: 1.7">本系统是单页应用，所有视图由前端渲染。请在浏览器设置中允许本页运行脚本后刷新。</p>
+      </div>
+    </noscript>
     <!-- 兜底提示：直接双击 index.html 时资源路径会被当成 file:///C:/assets/... 全部 404，
          页面会白屏且控制台一堆 NOT FOUND。这里提前说明正确打开方式。 -->
     <script>
