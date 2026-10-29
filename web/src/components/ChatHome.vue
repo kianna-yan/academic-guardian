@@ -35,6 +35,11 @@ const HOME: Record<Role, { title: string; sub: string; dash: string }> = {
     sub: "用通俗的话说明孩子的情况",
     dash: "孩子的学情报告",
   },
+  teacher: {
+    title: "教学助手",
+    sub: "你课上学生的考勤、作业与风险",
+    dash: "课堂学情看板",
+  },
 };
 
 const PLACEHOLDER: Record<Role, string> = {
@@ -42,6 +47,7 @@ const PLACEHOLDER: Record<Role, string> = {
   counselor: "比如：本班谁的风险上升最快？",
   admin: "比如：全校风险分布如何？",
   parent: "比如：孩子这学期情况怎么样？",
+  teacher: "比如：我课上的学生？谁的风险最高？",
 };
 
 const home = computed(() => HOME[props.role] ?? HOME.student);

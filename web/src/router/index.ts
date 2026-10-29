@@ -45,6 +45,12 @@ const router = createRouter({
       component: () => import("@/views/ParentView.vue"),
       meta: { title: "家长端", sub: "了解孩子在校情况，与学校形成合力", role: "parent" },
     },
+    {
+      path: "/teacher",
+      name: "teacher",
+      component: () => import("@/views/TeacherView.vue"),
+      meta: { title: "教师端", sub: "任课视角的课堂学情与风险研判", role: "teacher" },
+    },
     { path: "/:pathMatch(.*)*", redirect: "/student" },
   ],
   scrollBehavior() {

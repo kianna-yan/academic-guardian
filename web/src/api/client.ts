@@ -20,6 +20,8 @@ import type {
   Role,
   RosterRow,
   StudentDetail,
+  TeacherClassroom,
+  TeacherView,
   TodoItem,
 } from "@/types";
 
@@ -137,6 +139,9 @@ export const api = {
   students: (params: { class_name?: string; level?: string; limit?: number } = {}) =>
     get<{ total: number; rows: RosterRow[] }>("/students", { params }),
   student: (sid: string) => get<StudentDetail>(`/students/${sid}`),
+  teacherView: () => get<TeacherView>("/teacher/view"),
+  /** 课堂学情：以「我教的这门课」为统计单位 */
+  teacherClassroom: () => get<TeacherClassroom>("/teacher/classroom"),
   letter: (sid: string, type: "student" | "parent" | "counselor") =>
     get<Letter>(`/letters/${sid}`, { params: { type } }),
   report: (className: string) => get<Letter>(`/reports/${className}`),

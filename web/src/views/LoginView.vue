@@ -52,6 +52,14 @@ const ENTRIES: Entry[] = [
     placeholder: "请输入孩子的学号",
     icon: "家",
   },
+  {
+    key: "teacher",
+    name: "教师端",
+    sub: "任课视角的课堂学情与风险研判",
+    accountLabel: "工号",
+    placeholder: "请输入任课教师工号",
+    icon: "师",
+  },
 ];
 
 const active = ref<Role>("student");
@@ -63,6 +71,7 @@ const showPwd = ref(false);
 const entry = computed(() => ENTRIES.find((e) => e.key === active.value)!);
 const demoStudent = computed(() => app.meta?.demo?.student || "20240067");
 const demoParent = computed(() => app.meta?.demo?.parent || demoStudent.value);
+const demoTeacher = computed(() => app.meta?.demo?.teacher || "2024014501");
 
 /** 切换入口时清空密码，避免把学生密码带进教务端 */
 watch(active, () => {
@@ -100,7 +109,7 @@ async function submit() {
   }
 }
 
-function fill(kind: "student" | "counselor" | "admin" | "parent") {
+function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   if (kind === "student") {
     active.value = "student";
     form.account = demoStudent.value;
@@ -113,6 +122,10 @@ function fill(kind: "student" | "counselor" | "admin" | "parent") {
     active.value = "counselor";
     form.account = "2024014589";
     form.password = "1111";
+  } else if (kind === "teacher") {
+    active.value = "teacher";
+    form.account = demoTeacher.value;
+    form.password = "4444";
   } else {
     active.value = "admin";
     form.account = "1234567899";
@@ -137,9 +150,9 @@ function fill(kind: "student" | "counselor" | "admin" | "parent") {
           </div>
         </div>
 
-        <h1>四个入口，各看各的</h1>
+        <h1>五个入口，各看各的</h1>
         <p class="lead">
-          学生自查、辅导员跟进、教务定规则、家长知情。每个端用各自的账号登录，
+          学生自查、辅导员跟进、教务定规则、家长知情、任课教师盯课堂。每个端用各自的账号登录，
           看到的范围和可执行的动作都不同，数据不出角色边界。
         </p>
 
@@ -148,6 +161,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent") {
           <li><b>辅导员端</b> 看本班名单排序、谈话要点与跟进记录</li>
           <li><b>教务端</b> 配置预警线、批量开通学生账号、导出全校名单</li>
           <li><b>家长端</b> 用孩子学号登录，只看孩子的状态与配合方式</li>
+          <li><b>教师端</b> 用工号登录，看自己课上学生的考勤、作业与风险</li>
         </ul>
 
         <div class="login-meta">

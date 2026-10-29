@@ -1,5 +1,5 @@
 export type Level = "red" | "yellow" | "green";
-export type Role = "student" | "counselor" | "admin" | "parent";
+export type Role = "student" | "counselor" | "admin" | "parent" | "teacher";
 
 export interface Factor {
   key: string;
@@ -399,7 +399,7 @@ export interface Meta {
   llm: { enabled: boolean; model: string; base_url: string };
   term: string;
   week: number;
-  demo: { student: string; parent: string; counselor: string };
+  demo: { student: string; parent: string; counselor: string; teacher?: string };
   student_count: number;
   updated_at: string;
 }
@@ -473,4 +473,164 @@ export interface NoticePayload {
   todos: TodoItem[];
   counts: { unread: number; todo: number; appeals_pending?: number };
   appeals?: AppealItem[];
+}
+
+/* ------------------------------------------------------------------
+ * 教师端：任课老师视角的课堂学情
+ * ---------------------------------------------------------------- */
+export interface TeacherCourseBrief {
+  code: string;
+  name: string;
+  credit?: number;
+  kind?: string;
+  period?: string;
+  teacher?: string;
+}
+
+export interface TeacherStudentRow {
+  id: string;
+  name: string;
+  class_name: string;
+  score: number;
+  level: Level;
+  level_label: string;
+  top_factor: string;
+  courses: {
+    code: string;
+    name: string;
+    midterm?: number | null;
+    absent: number;
+    late?: number;
+    sessions_held?: number;
+    hw_submitted: number;
+    hw_assigned: number;
+    cohort_avg?: number | null;
+    attendance?: AttendanceRecord[];
+    homework?: HomeworkRecord[];
+  }[];
+}
+
+export interface TeacherView {
+  teacher: string;
+  courses: TeacherCourseBrief[];
+  students: TeacherStudentRow[];
+}
+
+/* ------------------------------------------------------------------
+ * 教师端课堂学情：以「我教的这门课」为单位统计（/api/teacher/classroom）
+ * ---------------------------------------------------------------- */
+export interface ScoreBand {
+  label: string;
+  count: number;
+  pct: number;
+}
+
+export interface ClassRoomRow {
+  class_name: string;
+  students: number;
+  mid_avg: number;
+  /** 与本课均分之差，负数=落后 */
+  gap: number;
+  hw_rate: number;
+  absent_rate: number;
+  absent: number;
+  late: number;
+  low: number;
+}
+
+export interface WeekAttend {
+  week: number;
+  absent: number;
+  late: number;
+  present: number;
+  total: number;
+}
+
+export interface HwItem {
+  id: string;
+  title: string;
+  due: string;
+  assigned: string;
+  submitted: number;
+  late: number;
+  missing: number;
+  total: number;
+  rate: number;
+  ontime_rate: number;
+}
+
+export interface ClassCourse {
+  code: string;
+  name: string;
+  credit?: number;
+  kind?: string;
+  period?: string;
+  students: number;
+  mid_avg: number;
+  /** 全校同一门课的均分（与 mid_avg 同群体，仅供对照留档） */
+  cohort_avg: number | null;
+  /** 年级六门课学分加权总均分 */
+  grade_avg: number;
+  /** 本课均分 − 年级总均分：正数=这门课给分偏松/学生学得好 */
+  gap_grade: number;
+  median: number;
+  highest: number;
+  lowest: number;
+  std: number;
+  pass_rate: number;
+  dist: ScoreBand[];
+  risk: { red: number; yellow: number; green: number };
+  attend: { sessions: number; absent: number; late: number; rate: number; weekly: WeekAttend[] };
+  hw: { assigned: number; submitted: number; rate: number; items: HwItem[] };
+  classes: ClassRoomRow[];
+}
+
+export interface ClassroomStudent {
+  id: string;
+  name: string;
+  class_name: string;
+  score: number;
+  level: Level;
+  level_label: string;
+  top_factor: string;
+  code: string;
+  course: string;
+  midterm: number | null;
+  cohort_avg: number | null;
+  /** 与课堂均分之差 */
+  gap: number;
+  absent: number;
+  late: number;
+  sessions_held: number;
+  hw_submitted: number;
+  hw_assigned: number;
+  hw_missing: number;
+  /** 课堂内期中排名 */
+  rank: number;
+  rank_total: number;
+  /** 最长连续旷课次数 */
+  absent_streak: number;
+  attendance: AttendanceRecord[];
+  homework: HomeworkRecord[];
+}
+
+export interface ClassroomTodo {
+  id: string;
+  kind: "homework" | "attendance" | "grade" | "risk";
+  tone: "red" | "amber" | "ok";
+  title: string;
+  detail: string;
+  names: string[];
+  sids: string[];
+  action: string;
+}
+
+export interface TeacherClassroom {
+  teacher: TeacherProfile & { employee_id?: string };
+  term: string;
+  week: number;
+  courses: ClassCourse[];
+  students: ClassroomStudent[];
+  todos: ClassroomTodo[];
+  summary: string;
 }

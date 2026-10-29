@@ -9,6 +9,7 @@ export const HOME_OF: Record<Role, string> = {
   counselor: "/counselor",
   admin: "/admin",
   parent: "/parent",
+  teacher: "/teacher",
 };
 
 export const useAuthStore = defineStore("auth", () => {
