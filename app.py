@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from engine import accounts, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
+from engine import accounts, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
 from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
@@ -47,7 +47,8 @@ ENGINE = RiskEngine(DATASET, CONFIG)
 KB = rag.kb()
 INTERVENTIONS: dict[str, list[dict]] = {}
 COUNTER = {"n": 0}
-ACCOUNTS = accounts.Accounts(DATASET["students"], BASE / "data" / "accounts.json")
+ACCOUNTS = accounts.Accounts(DATASET["students"], BASE / "data" / "accounts.json",
+                             teachers=DATASET.get("teachers", {}))
 # 教务维护过的课程/教师档案优先于内置默认值
 CURRICULUM = curriculum.Curriculum()
 CURRICULUM.apply(DATASET)
@@ -297,7 +298,8 @@ def _demo_students() -> dict:
     rows = ENGINE.roster()
     student = next((r for r in rows if r["level"] == "yellow" and r["delta"] > 8), rows[60])
     parent = next((r for r in rows if r["level"] == "red"), rows[0])
-    return {"student": student["id"], "parent": parent["id"], "counselor": student["id"]}
+    return {"student": student["id"], "parent": parent["id"], "counselor": student["id"],
+            "teacher": "2024014501"}
 
 
 def _entry_html() -> Path:
@@ -377,6 +379,7 @@ def meta():
             {"key": "counselor", "name": "辅导员端", "desc": "风险名单 · 谈话跟进"},
             {"key": "admin", "name": "教务端", "desc": "规则配置 · 全校看板"},
             {"key": "parent", "name": "家长端", "desc": "情况沟通 · 家校联动"},
+            {"key": "teacher", "name": "教师端", "desc": "任课视角 · 课堂学情"},
         ],
         "classes": DATASET["classes"],
         "schools": KB.schools(),
@@ -488,6 +491,51 @@ def agent_briefing(request: Request):
     sid = profile.get("sid")
     agent = _make_agent()
     return agent.briefing(role, sid, profile)
+
+
+@app.get("/api/teacher/view")
+def teacher_view(request: Request):
+    """任课教师视角的数据：他教的课 + 课上的学生（含风险分与该课明细）。"""
+    profile = request.state.profile
+    if profile.get("role") != "teacher":
+        raise HTTPException(403, "仅任课教师可访问")
+    teacher_name = profile.get("advisor") or profile.get("name") or ""
+    return ENGINE.teacher_view(teacher_name)
+
+
+def _teacher_scope(request: Request) -> str:
+    """教师只能看自己：名字一律从登录态取，前端传什么都不作数。"""
+    profile = request.state.profile
+    if profile.get("role") != "teacher":
+        raise HTTPException(403, "仅任课教师可访问")
+    return profile.get("advisor") or profile.get("name") or ""
+
+
+@app.get("/api/teacher/classroom")
+def teacher_classroom(request: Request):
+    """课堂学情：以「我教的这门课」为统计单位，而不是以学生为单位。"""
+    teacher_name = _teacher_scope(request)
+    return classroom.report(
+        ENGINE, teacher_name,
+        teacher_profile=DATASET.get("teachers", {}).get(teacher_name),
+        term=DATASET.get("term", ""),
+        week=DATASET.get("week", 0),
+    )
+
+
+@app.get("/api/export/classroom")
+def export_classroom(request: Request):
+    """课堂学情简报 → Word（教师端专属，其他端没有这个文书）。"""
+    teacher_name = _teacher_scope(request)
+    payload = classroom.report(
+        ENGINE, teacher_name,
+        teacher_profile=DATASET.get("teachers", {}).get(teacher_name),
+        term=DATASET.get("term", ""),
+        week=DATASET.get("week", 0),
+    )
+    stamp = datetime.now().strftime("%Y%m%d")
+    return _file_stream(exporter.classroom_docx(payload),
+                        f"课堂学情简报_{teacher_name}_{stamp}.docx", _DOCX_MIME)
 
 
 @app.post("/api/agent/reset")
