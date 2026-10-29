@@ -263,3 +263,36 @@ def seed(engine) -> None:
                            f"{lv} 级学生，风险分 {engine.score(s['id'])['score']}，"
                            f"可在对话里说「给 {s['name']} 生成谈话要点」先做功课。",
                            {"sid": s["id"], "level": lv})
+
+    # ---- 教师端：名下学生的作业未交 / 考勤异常 / 红色预警 ----
+    from collections import defaultdict
+    t_stats: dict = defaultdict(lambda: {"hw_missing": [], "absent": [], "red": []})
+    for s in students:
+        s_lv = engine.score(s["id"])["level"]
+        for c in s["courses"]:
+            tp = c.get("teacher_profile") or {}
+            eid = tp.get("employee_id")
+            if not eid:
+                continue
+            if any(h.get("status") == "missing" for h in c.get("homework", [])):
+                t_stats[eid]["hw_missing"].append(s["name"])
+            if c.get("absent", 0) > 0:
+                t_stats[eid]["absent"].append(s["name"])
+            if s_lv == "red":
+                t_stats[eid]["red"].append(s["name"])
+    for eid, st in t_stats.items():
+        if st["hw_missing"]:
+            names = "、".join(st["hw_missing"][:5])
+            NOTIFS.push("teacher", eid, "homework", f"作业未交提醒：{len(st['hw_missing'])} 名学生",
+                        f"未交学生：{names}{'等' if len(st['hw_missing']) > 5 else ''}。"
+                        f"建议下节课前提醒补交，可在对话里问「谁的风险最高」定位重点。",
+                        {"count": str(len(st["hw_missing"]))})
+            TODOS.push("teacher", eid, "homework", f"跟进 {len(st['hw_missing'])} 名学生补交作业",
+                       "在对话里问「我课上的学生」可看完整名单与明细。")
+        if st["red"]:
+            rnames = "、".join(st["red"][:5])
+            NOTIFS.push("teacher", eid, "risk", f"红色预警学生：{len(st['red'])} 名",
+                        f"红色名单：{rnames}{'等' if len(st['red']) > 5 else ''}。"
+                        f"建议联系辅导员联动帮扶。", {"count": str(len(st["red"]))})
+            TODOS.push("teacher", eid, "risk", f"关注 {len(st['red'])} 名红色预警学生",
+                       "在对话里问「我该重点关注谁」可拿重点名单。")

@@ -30,13 +30,15 @@ ROLE_STUDENT = "student"
 ROLE_COUNSELOR = "counselor"
 ROLE_ADMIN = "admin"
 ROLE_PARENT = "parent"
+ROLE_TEACHER = "teacher"
 
-ROLES = (ROLE_STUDENT, ROLE_COUNSELOR, ROLE_ADMIN, ROLE_PARENT)
+ROLES = (ROLE_STUDENT, ROLE_COUNSELOR, ROLE_ADMIN, ROLE_PARENT, ROLE_TEACHER)
 ROLE_LABEL = {
     ROLE_STUDENT: "学生",
     ROLE_COUNSELOR: "辅导员",
     ROLE_ADMIN: "教务",
     ROLE_PARENT: "家长",
+    ROLE_TEACHER: "任课教师",
 }
 
 DEFAULT_PASSWORD = {
@@ -44,6 +46,7 @@ DEFAULT_PASSWORD = {
     ROLE_COUNSELOR: "1111",
     ROLE_ADMIN: "2222",
     ROLE_PARENT: "3333",
+    ROLE_TEACHER: "4444",
 }
 
 COUNSELOR_ACCOUNT = "2024014589"
@@ -75,9 +78,10 @@ class AccountError(Exception):
 class Accounts:
     """账号库 + 登录态。所有公开方法都返回纯 dict，方便直接丢给 FastAPI。"""
 
-    def __init__(self, students: list[dict], path: Path):
+    def __init__(self, students: list[dict], path: Path, teachers: dict | None = None):
         self.path = Path(path)
         self.students = {str(s["id"]): s for s in students}
+        self.teachers = teachers or {}  # {教师姓名: {...含 employee_id}}
         self.data: dict[str, Any] = {}
         self.persistent = True
         self._load()
@@ -94,6 +98,7 @@ class Accounts:
         self.data.setdefault("students", {})
         self.data.setdefault("parents", {})
         self.data.setdefault("staff", {})
+        self.data.setdefault("teachers", {})
 
     def _save(self) -> None:
         """落盘失败不阻断业务。
@@ -123,6 +128,21 @@ class Accounts:
                     "account": account,
                     "salt": salt,
                     "hash": _hash(DEFAULT_PASSWORD[role], salt),
+                    "changed": False,
+                    "created_at": _now(),
+                }
+                changed = True
+        # 任课教师账号：每位教师一个工号，关联到 data.TEACHERS 的姓名
+        for tname, tinfo in self.teachers.items():
+            eid = tinfo.get("employee_id") or tname
+            if eid not in self.data["teachers"]:
+                salt = secrets.token_hex(8)
+                self.data["teachers"][eid] = {
+                    "role": ROLE_TEACHER,
+                    "account": eid,
+                    "teacher_name": tname,
+                    "salt": salt,
+                    "hash": _hash(DEFAULT_PASSWORD[ROLE_TEACHER], salt),
                     "changed": False,
                     "created_at": _now(),
                 }
@@ -177,6 +197,20 @@ class Accounts:
             "must_change": not entry.get("changed", False),
         }
 
+    def _teacher_profile(self, entry: dict) -> dict:
+        """教师身份：name=教师名（后端按名查所教课与学生），class_name=所在院系。"""
+        tname = entry.get("teacher_name", "")
+        tinfo = self.teachers.get(tname, {})
+        return {
+            "role": ROLE_TEACHER,
+            "account": entry["account"],
+            "sid": None,
+            "name": tname,
+            "class_name": tinfo.get("dept", "任课教师"),
+            "advisor": tname,  # 复用 advisor 字段带教师名，后端按此查所教课
+            "must_change": not entry.get("changed", False),
+        }
+
     def _entry_for(self, role: str, account: str) -> dict | None:
         """取账号条目；学生/家长首次登录时懒创建（等价于教务已为其开通）。"""
         account = (account or "").strip()
@@ -203,6 +237,8 @@ class Accounts:
             if entry and entry["account"] == account:
                 return entry
             return None
+        if role == ROLE_TEACHER:
+            return self.data["teachers"].get(account)
         return None
 
     # ---------------------------------------------------------------- 登录态
@@ -251,6 +287,8 @@ class Accounts:
             return self._student_profile(account, entry)
         if role == ROLE_PARENT:
             return self._parent_profile(account, entry)
+        if role == ROLE_TEACHER:
+            return self._teacher_profile(entry)
         return self._staff_profile(role, entry)
 
     # ------------------------------------------------------------------ 接口
@@ -370,11 +408,13 @@ class Accounts:
         opened = len(self.data["students"])
         changed = sum(1 for e in self.data["students"].values() if e.get("changed"))
         parents = len(self.data["parents"])
+        teachers = len(self.data["teachers"])
         return {
             "student_total": total,
             "student_accounts": opened,
             "student_changed": changed,
             "parent_accounts": parents,
+            "teacher_accounts": teachers,
         }
 
 
