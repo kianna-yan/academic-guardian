@@ -53,6 +53,27 @@ if (SHARE_CODE && !new URLSearchParams(location.search).get("sharecode")) {
 export const http = axios.create({ baseURL: "/api", timeout: 25000 });
 
 /* ------------------------------------------------------------------
+ * 大模型健康状态（顶部黄条用）
+ * ok=false 意味着后端已经回落规则引擎：数据照常查，但回答是模板句。
+ * probe=true 会真发一次几个 token 的请求探活，用于「重试连接」。
+ * ---------------------------------------------------------------- */
+export interface LlmStatus {
+  enabled: boolean;
+  ok: boolean;
+  reason: string;
+  model: string;
+  route_model: string;
+  checked_at: string;
+  fails: number;
+}
+
+export function fetchLlmStatus(probe = false): Promise<LlmStatus> {
+  return http
+    .get<LlmStatus>("/llm/status", probe ? { params: { probe: 1 } } : undefined)
+    .then((r) => r.data);
+}
+
+/* ------------------------------------------------------------------
  * 登录态
  * token 放 localStorage（关掉页面再回来还在），每次请求带 Bearer。
  * 过期由后端判 401，前端收到 401 就清掉并踢回登录页。

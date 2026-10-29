@@ -912,6 +912,18 @@ def get_config():
     return CONFIG
 
 
+@app.get("/api/llm/status")
+def llm_status(probe: int = 0):
+    """大模型健康状态，前端顶部黄条用。
+
+    probe=1 时真发一次最小请求探活（几个 token），用于点「重试连接」后立刻
+    确认恢复没有——不然 HEALTH 要等到下一次真实对话才会翻回正常。
+    """
+    if probe and llm.available():
+        llm.chat([{"role": "user", "content": "ping"}], max_tokens=4, timeout=12)
+    return llm.health()
+
+
 @app.get("/api/interventions/{sid}")
 def list_interventions(sid: str):
     return {"items": INTERVENTIONS.get(sid, [])}

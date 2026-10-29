@@ -17,11 +17,68 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import urllib.error
 import urllib.request
 
 DEFAULT_BASE = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"
+
+# ---- 运行期健康状态 ----------------------------------------------------
+# 给前端顶部黄条用：一次调用真失败就置 False，下一次成功再自动置回 True。
+# 之所以要记这个，是因为失败会被上层静默吞掉、回落规则引擎作答——
+# 页面看着正常，只是措辞变生硬，不主动提示的话没人知道大模型已经掉线了。
+HEALTH: dict = {"ok": True, "reason": "", "at": 0.0, "fails": 0}
+_HEALTH_LOCK = threading.Lock()
+
+
+def _fail_reason(err) -> str:
+    """把异常翻成一句人能看懂的原因，前端黄条直接显示。"""
+    if isinstance(err, urllib.error.HTTPError):
+        try:
+            raw = err.read().decode("utf-8", "ignore")[:160]
+        except OSError:
+            raw = ""
+        if err.code in (401, 403):
+            return f"密钥无效或权限不足（HTTP {err.code}）"
+        if err.code == 429:
+            return "额度已用尽或频率超限（HTTP 429）"
+        if err.code >= 500:
+            return f"模型服务端异常（HTTP {err.code}）"
+        return f"调用被拒（HTTP {err.code}）" + (f" {raw}" if raw else "")
+    return "网络不可达或响应异常"
+
+
+def _mark_fail(err) -> None:
+    reason = _fail_reason(err)
+    with _HEALTH_LOCK:
+        HEALTH["ok"] = False
+        HEALTH["reason"] = reason
+        HEALTH["at"] = time.time()
+        HEALTH["fails"] += 1
+
+
+def _mark_ok() -> None:
+    with _HEALTH_LOCK:
+        if not HEALTH["ok"]:
+            HEALTH["ok"] = True
+            HEALTH["reason"] = ""
+            HEALTH["at"] = time.time()
+
+
+def health() -> dict:
+    """前端黄条要的状态。enabled=False 表示压根没配 key，永远走规则引擎。"""
+    with _HEALTH_LOCK:
+        snap = dict(HEALTH)
+    snap["enabled"] = available()
+    snap["model"] = _model()
+    snap["route_model"] = route_model() or _model()
+    snap["checked_at"] = time.strftime("%H:%M:%S", time.localtime(snap["at"])) if snap["at"] else ""
+    if not snap["enabled"]:
+        snap["ok"] = False
+        snap["reason"] = "未配置大模型（LLM_API_KEY 为空）"
+    return snap
 
 
 def _base_url() -> str:
@@ -103,8 +160,13 @@ def chat(messages: list[dict], temperature: float = 0.3, max_tokens: int = 700,
     try:
         with _post(_payload(messages, temperature, max_tokens, model=model), timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+        _mark_ok()
         return (data["choices"][0]["message"].get("content") or "").strip()
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError, OSError):
+    except urllib.error.HTTPError as e:
+        _mark_fail(e)
+        return None
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError, OSError) as e:
+        _mark_fail(e)
         return None
 
 
@@ -115,6 +177,7 @@ def chat_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
         return
     try:
         with _post(_payload(messages, temperature, max_tokens, stream=True, model=model), timeout) as resp:
+            _mark_ok()
             for raw in resp:
                 line = raw.decode("utf-8", "ignore").strip()
                 if not line.startswith("data:"):
@@ -158,11 +221,14 @@ def chat_tools(messages: list[dict], tools: list[dict], temperature: float = 0.2
         except OSError:
             detail = ""
         print(f"[llm] HTTP {e.code} {detail}", flush=True)
+        _mark_fail(e)
         return None
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as e:
         print(f"[llm] 调用失败：{e}", flush=True)
+        _mark_fail(e)
         return None
 
+    _mark_ok()
     choice = (data.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
     return {
@@ -201,6 +267,7 @@ def stream_tools(messages: list[dict], tools: list[dict], temperature: float = 0
 
     try:
         with _post(body, timeout) as resp:
+            _mark_ok()
             for raw in resp:
                 line = raw.decode("utf-8", "ignore").strip()
                 if not line.startswith("data:"):
@@ -237,6 +304,7 @@ def stream_tools(messages: list[dict], tools: list[dict], temperature: float = 0
         print(f"[llm] 流式调用失败：{e}", flush=True)
         # 已经吐出部分文本就当作成功，否则交给上层回落
         if not content:
+            _mark_fail(e)
             return None
 
     calls = [slots[k] for k in sorted(slots) if slots[k]["function"]["name"]]
