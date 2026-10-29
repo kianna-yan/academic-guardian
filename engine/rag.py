@@ -102,6 +102,10 @@ class KnowledgeBase:
             c["score"] = round(score, 2)
             c["citation"] = f"{c['school']}·{c['title']}"
             out.append(c)
+        # school 限定太严导致一条都没命中时，回退全库再检索一次，
+        # 避免「配了学校名但学生问的是通用政策」时返回空回答
+        if not out and school:
+            return self.search(query, top_k=top_k, school=None, min_score=min_score)
         return out
 
     def schools(self) -> list[str]:

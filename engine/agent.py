@@ -22,10 +22,13 @@ from .rag import KnowledgeBase
 POLICY_WORDS = ["校规", "规定", "政策", "教育部", "降级", "劝退", "退学", "学分要求",
                 "多少学分", "几门", "预警线", "通知家长", "什么时候", "多久", "文件"]
 WHY_WORDS = ["为什么", "原因", "怎么回事", "怎么算", "依据", "评估", "风险分", "多少分", "严重"]
-ADVICE_WORDS = ["怎么办", "建议", "提高", "计划", "补救", "行动", "帮我", "如何", "怎么改", "来得及"]
+ADVICE_WORDS = ["怎么办", "建议", "提高", "计划", "补救", "行动", "帮我", "如何", "怎么改", "来得及",
+               "能做什么", "做什么", "帮上忙", "帮什么忙", "在家", "配合", "怎么帮", "能帮", "家长能"]
 ROSTER_WORDS = ["谁", "名单", "哪些", "班级", "几个人", "多少人", "学生"]
 OVERVIEW_WORDS = ["整体", "全校", "概况", "分布", "统计", "总览", "情况如何"]
-LETTER_WORDS = ["告知函", "家长信", "通知", "信件", "周报", "报告"]
+# 文书意图只认具体文书名；裸「通知」曾把「学校什么情况下会通知家长」
+# 抢成 letter（1.8 > policy 1.2），导致学生端答成风险分——已修
+LETTER_WORDS = ["告知函", "家长信", "通知书", "信件", "周报", "报告"]
 # 成绩走势单独成类：「我退步了吗」「这学期在涨还是掉」都要能答
 TREND_WORDS = ["趋势", "走势", "成绩变化", "退步", "进步", "下滑", "上升", "名次",
                "排名", "排第几", "曲线", "起伏", "越来越", "涨", "掉", "变化"]
@@ -37,6 +40,17 @@ RECORD_WORDS = ["记录一下", "记录", "登记", "已谈", "谈过了", "谈�
                 "已经谈话", "做了辅导", "已联系"]
 # 指代与追问：这些词本身不带主题，得靠上一轮的记忆补全
 PRONOUN_WORDS = ["他", "她", "这个学生", "这孩子", "那孩子", "这位同学"]
+# 任课老师与联系方式：数据在每门课的 teacher_profile 里，不在校规库里
+CONTACT_WORDS = ["老师", "任课", "教师", "电话", "邮箱", "联系方式", "办公室",
+                 "答疑", "几点", "上课时间", "办公时间", "怎么联系", "office hour"]
+# 考勤明细：问的是「哪几次没去」，要落到具体日期，不是风险分
+ATTENDANCE_WORDS = ["缺勤", "旷课", "没去", "迟到", "考勤", "出勤", "几次课",
+                    "哪天没", "请假", "缺席"]
+# 作业明细：哪次没交、什么时候截止
+HOMEWORK_WORDS = ["作业", "没交", "未交", "漏交", "少交", "补交", "迟交", "截止"]
+# 课表与学分统计：这学期有什么课、修了多少学分
+COURSE_WORDS = ["课表", "这学期有什么课", "哪些课", "修了什么", "几门课", "学分",
+                "选课", "在读"]
 # 导出与触达：把事实落成文件（Word/PPT）或发出去（邮件）
 EXPORT_WORDS = ["导出", "下载", "打印", "word", "docx", "word文档", "成文档", "存档",
                 "ppt", "pptx", "汇报", "总结", "发邮件", "发给家长", "发送", "邮件",
@@ -81,6 +95,15 @@ PERSONAS: dict[str, str] = {
         "回答给出结构化的数据结论和管理建议。"
         + _BASE_RULES
     ),
+    "teacher": (
+        "你是任课老师的教学助手，像一位备课组同事。"
+        "只围绕这位老师自己教的课、以及修这些课的学生说话——考勤、作业、期中成绩、挂科风险，"
+        "绝不谈论该老师未任课的班级或其他课程。"
+        "语气专业务实，先给数据结论（谁缺勤最多、谁作业没交、班均多少），"
+        "再给教学层面可落地的下一步（重点关注谁、作业布置是否调整、是否反馈给辅导员）。"
+        "需要辅导员介入时直说「建议联系辅导员」，不替辅导员做谈话安排。"
+        + _BASE_RULES
+    ),
 }
 
 
@@ -119,7 +142,11 @@ class Agent:
         return self.engine.interventions(sid)
 
     def t_policy(self, query: str, school: str | None = None) -> list[dict]:
-        return self.kb.search(query, top_k=2, school=school)
+        # policy 检索跨全库：评委/学生问的是通用规则，不该被学校名挡住具体条款
+        # （如「挂多少学分会被降级」应召回华南理工「降级试读条件·25 学分」，
+        #  而非只剩教育部通用政策）。school 参数保留兼容调用，内部不限定。
+        hits = self.kb.search(query, top_k=4, school=None, min_score=0.3)
+        return hits[:3]
 
     def t_roster(self, class_name: str | None = None, level: str | None = None, limit: int = 8) -> list[dict]:
         return self.engine.roster(class_name, level)[:limit]
@@ -150,6 +177,10 @@ class Agent:
     def t_brief(self, sid: str, school: str | None = None) -> dict:
         """谈话要点：直接复用文书模块，对话里要提纲不用切页面。"""
         return counselor_brief(self.engine, self.kb, sid, school)
+
+    def t_teacher_view(self, teacher_name: str) -> dict:
+        """任课教师视角：他教的课 + 课上的学生（含风险分与该课明细）。"""
+        return self.engine.teacher_view(teacher_name)
 
     def t_record(self, sid: str, title: str, note: str, status: str = "已完成") -> dict:
         if not self.recorder:
@@ -314,6 +345,10 @@ class Agent:
             "brief": hit(BRIEF_WORDS) * 2.2,
             "record": hit(RECORD_WORDS) * 2.6,
             "export": hit(EXPORT_WORDS) * 2.4,
+            "contact": hit(CONTACT_WORDS) * 1.8,
+            "attendance": hit(ATTENDANCE_WORDS) * 1.8,
+            "homework": hit(HOMEWORK_WORDS) * 1.8,
+            "course": hit(COURSE_WORDS) * 1.8,
         }
         if "怎么办" in text or "建议" in text:
             scores["advice"] += 1.5
@@ -328,8 +363,20 @@ class Agent:
         # 明确要文件的动作词，export 压过 letter（letter 只是"看看文书"）
         if any(w in text for w in ["导出", "下载", "打印", "word", "docx", "ppt", "发邮件", "发给家长"]):
             scores["export"] += 3
+        # 「学校什么情况下会通知家长」是问制度，必须走 policy 检索条款，
+        # 不能被任何文书/风险类词抢走
+        if "通知" in text and any(w in text for w in ["家长", "什么情况", "什么时候", "什么条件", "多久"]):
+            scores["policy"] += 3
+        # 「这学期修了多少学分」是学分统计；只有带「降级/退学」语境才是政策条款
+        if "学分" in text and not any(w in text for w in ["降级", "劝退", "退学", "规定", "要求"]):
+            scores["course"] += 1.2
+        # 老师联系方式必然伴随课程或「老师」本身，别让「数据结构」里的「结构」类词干扰
+        if any(w in text for w in ["电话", "邮箱", "联系方式", "办公室", "答疑"]):
+            scores["contact"] += 2
         best = max(scores, key=scores.get)
-        return best if scores[best] > 0 else "why"
+        # 没有任何学业关键词命中时返回 unknown，让各端走兜底说「答不准」，
+        # 而不是默认 why 把「今天天气怎么样」也答成风险分
+        return best if scores[best] > 0 else "unknown"
 
     # ---------- 生成 ----------
     def _risk_sentence(self, s: dict, r: dict) -> str:
@@ -379,6 +426,71 @@ class Agent:
         if any(w in body for w in ["约了", "下次", "待", "计划"]):
             status = "进行中"
         return title, body, status
+
+    # ---------- 明细类问答：考勤/作业/老师/课表，数据都在学生课表里 ----------
+    def _compose_contact(self, sid: str, message: str, who: str = "") -> list[str]:
+        """任课老师与联系方式。消息里提到具体课程就只给那位老师，否则列全部。"""
+        s = self.engine.get(sid)
+        named = [c for c in s["courses"] if c["name"] in message or c["code"] in message]
+        picked = named or s["courses"]
+        lines = []
+        for c in picked:
+            tp = c.get("teacher_profile") or {}
+            line = f"**{c['name']}**（{c['credit']} 学分·{c['kind']}·{c['period']}）—— {c['teacher']}"
+            if tp:
+                line += (f"，{tp.get('title', '')}，{tp.get('dept', '')}"
+                         f"\n  办公室：{tp.get('office', '—')}｜邮箱：{tp.get('email', '—')}"
+                         f"｜电话：{tp.get('phone', '—')}｜答疑时间：{tp.get('office_hour', '—')}")
+            lines.append(line)
+        head = f"{who}{'的' if who else ''}任课老师" + (f"（{named[0]['name']}）：" if named else f"一共 {len(s['courses'])} 位：")
+        return [head] + [f"- {x}" for x in lines] + ["有问题优先去答疑时间找老师；邮件里说明班级姓名和具体问题，回复会更快。"]
+
+    def _compose_attendance(self, sid: str, who: str = "") -> list[str]:
+        """考勤明细：落到「哪周星期几第几节」，不是一句「缺勤17次」。"""
+        s = self.engine.get(sid)
+        lines = []
+        total_abs = total_late = 0
+        for c in s["courses"]:
+            if c["absent"] or c["late"]:
+                total_abs += c["absent"]
+                total_late += c["late"]
+                bad = [a for a in c["attendance"] if a["status"] in ("absent", "late")]
+                detail = "；".join(
+                    f"第{a['week']}周{a['weekday']}{a['period']}（{'旷课' if a['status'] == 'absent' else a['note']}）"
+                    for a in bad[:4])
+                more = f" 等 {len(bad)} 次" if len(bad) > 4 else ""
+                lines.append(f"- **{c['name']}**：旷课 {c['absent']} 次、迟到 {c['late']} 次（已上 {c['sessions_held']} 节）——{detail}{more}")
+        if not lines:
+            return [f"{who}的考勤是满勤，一门课都没缺过，这项没有扣分。"]
+        head = f"{who}的考勤合计：旷课 {total_abs} 次、迟到 {total_late} 次。落到具体记录："
+        return [head] + lines + ["明细可在「课堂考勤」页逐条核对；哪条记录有出入，点那一条的「异议」提交给辅导员。"]
+
+    def _compose_homework(self, sid: str, who: str = "") -> list[str]:
+        """作业明细：哪次没交、什么时候截止，按未交在前。"""
+        s = self.engine.get(sid)
+        lines = []
+        for c in s["courses"]:
+            bad = [h for h in c["homework"] if h["status"] in ("missing", "late")]
+            for h in bad:
+                if h["status"] == "missing":
+                    state = f"未交（截止 {h['due']}，已过截止日）"
+                else:
+                    state = f"迟交（{h['submitted_at'][:10]} 交的，截止 {h['due']}）"
+                lines.append(f"- **{c['name']}**「{h['title']}」：{state}")
+        if not lines:
+            return [f"{who}的作业全部按时提交，这项没有扣分。"]
+        return [f"{who}目前的作业问题是："] + lines + [
+            "作业提交率在风险分里占 20% 的权重，把未交的先补上最划算；明细可在「作业平台」核对。"]
+
+    def _compose_courses(self, sid: str, who: str = "") -> list[str]:
+        """课表与学分统计。"""
+        s = self.engine.get(sid)
+        cr = s["credits"]
+        total = sum(c["credit"] for c in s["courses"])
+        lines = [f"- {c['name']}（{c['credit']} 学分·{c['kind']}·{c['teacher']}·{c['period']}）"
+                 for c in s["courses"]]
+        return ([f"{who}本学期在修 {len(s['courses'])} 门课、共 {total} 学分："] + lines +
+                [f"培养方案要求 {cr['plan_total']} 学分，已修 {cr['earned']}，本学期在读 {cr['in_progress']}。"])
 
     def answer(self, role: str, sid: str | None, message: str, school: str | None = None,
                emit=None, profile: dict | None = None) -> dict:
@@ -465,10 +577,32 @@ class Agent:
                 citations = hits
                 blocks.append(self._compose_policy(hits))
                 blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
+            if intent == "contact":
+                think("问的是任课老师，从课表里带出老师的档案与联系方式。")
+                blocks.extend(self._compose_contact(sid, message, who=""))
+            if intent == "attendance":
+                think("问的是考勤明细，落到每一次异常记录。")
+                blocks.extend(self._compose_attendance(sid))
+            if intent == "homework":
+                think("问的是作业明细，把未交和迟交的挑出来。")
+                blocks.extend(self._compose_homework(sid))
+            if intent == "course":
+                think("问的是课表或学分，直接给在修课程清单。")
+                blocks.extend(self._compose_courses(sid))
             if not blocks:
-                # 兜底：问法没命中任何分支时，至少给结论，不能返回空回答
-                blocks.append(self._risk_sentence(s, r))
-                blocks.append("你可以问我：为什么是这个分数、接下来做什么、我的成绩走势，或者学校的规定。")
+                # 没听懂的问题：先试知识库；检索不到就直说不会，绝不拿风险分充数
+                think("没匹配到已知问法，先去校规知识库试一次。")
+                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                if hits:
+                    citations = hits
+                    blocks.append(self._compose_policy(hits))
+                    blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
+                else:
+                    blocks.append("这个问题我暂时答不准，不想瞎猜误事。我擅长这些：")
+                    blocks.append("- 考勤与作业明细：「我哪次作业没交」「我缺了几次课」")
+                    blocks.append("- 任课老师联系：「数据结构老师的邮箱」「我的老师都有谁」")
+                    blocks.append("- 风险与走势：「我的风险分为什么这么高」「我的成绩走势怎么样」")
+                    blocks.append("- 校规条款：「挂多少学分会被降级」「学校什么情况下会通知家长」")
         elif role == "parent" and sid:
             s = self.engine.get(sid)
             r = call("risk_score", self.t_risk, sid=sid)
@@ -484,11 +618,29 @@ class Agent:
             if intent == "trend":
                 blocks.append(self._compose_trend(call("grade_trend", self.t_trend, sid=sid)))
                 blocks.append(f"对照 {s['name']} 当前的风险分 {r['score']}（{r['level_label']}）。")
-            policy_q = any(w in message for w in ["通知", "规定", "政策", "什么时候", "多少", "几门", "降级", "毕业", "退学"])
+            if intent in ("contact", "attendance", "homework", "course"):
+                # 家长问孩子的课表、老师、作业、考勤：给明细，口吻用「孩子」
+                think(f"家长在问孩子的{ {'contact': '老师与联系方式', 'attendance': '考勤明细', 'homework': '作业明细', 'course': '课表学分'}[intent] }。")
+                if intent == "contact":
+                    blocks.extend(self._compose_contact(sid, message, who="孩子"))
+                elif intent == "attendance":
+                    blocks.extend(self._compose_attendance(sid, who="孩子"))
+                elif intent == "homework":
+                    blocks.extend(self._compose_homework(sid, who="孩子"))
+                else:
+                    blocks.extend(self._compose_courses(sid, who="孩子"))
             if intent == "trend":
                 # 成绩走势已经答完了，不再叠一段政策，家长一次只吸收一件事
                 pass
-            elif policy_q:
+            elif intent == "advice":
+                think("家长在问能做什么，给在家能落地的配合方式。")
+                blocks.append(f"{s['name']} 目前的状态：{r['level_label']}，风险分 {r['score']}，主导因素是{r['factors'][0]['label']}。")
+                blocks.append("在家能帮上忙的三件事：")
+                blocks.append("1. 固定作息——缺勤和迟交大多从作息乱掉开始，先保证上课日的起床时间。")
+                blocks.append("2. 每周看一次作业平台——不用盯着做，只确认「这周的都交了」。")
+                blocks.append("3. 和任课老师建立联系——用答疑时间当面问一次，比微信上问十次有效。")
+                blocks.append(f"学校的告知函会写明 {s['name']} 的具体问题与补救路径，需要的话我可以导一份家长信给您。")
+            elif intent == "policy" or any(w in message for w in ["通知", "规定", "政策", "什么时候", "多少", "几门", "降级", "毕业", "退学"]):
                 think("家长在问学校政策，检索制度库里关于家长通知的条款。")
                 hits = call("retrieve_policy", self.t_policy, query=message + " 家长 学业预警", school=school)
                 citations = hits
@@ -496,6 +648,12 @@ class Agent:
                 blocks.append(
                     f"对照 {s['name']} 的情况：风险分 {r['score']}（{r['level_label']}），"
                     f"累计挂科 {s['history']['failed_credits']} 学分，目前处于关注与帮扶阶段，尚未触发处分线。")
+            elif intent == "unknown":
+                blocks.append("这个问题我答不准，不想瞎猜。我擅长帮您看这些：")
+                blocks.append("- 孩子的出勤与作业：「孩子哪次作业没交」「孩子缺了几次课」")
+                blocks.append("- 任课老师联系：「数据结构老师怎么联系」")
+                blocks.append("- 孩子的成绩走势与风险：「孩子成绩怎么样」「孩子的风险分」")
+                blocks.append("- 学校关于家校通知的规定：「学校什么情况下会通知家长」")
             else:
                 hits = call("retrieve_policy", self.t_policy, query="家长 通知 学业预警", school=school)
                 citations = hits[:1]
@@ -503,6 +661,141 @@ class Agent:
                 blocks.append("具体情况：\n" + "\n".join(f"- {x}" for x in self._factor_detail(s, r)[:3]))
                 if hits:
                     blocks.append(f"关于家校沟通：{hits[0]['text'].strip().split(chr(10))[0]}")
+        elif role == "teacher":
+            teacher_name = (profile or {}).get("advisor") or (profile or {}).get("name") or ""
+            tv = call("teacher_view", self.t_teacher_view, teacher_name=teacher_name)
+            my_students = tv["students"]
+            # 在「我教的学生」范围内解析指代：姓名越界要拦住，序数走上一轮名单
+            named = self._match_name(message)
+            t_sid = None
+            if named:
+                if any(st["id"] == named["id"] for st in my_students):
+                    t_sid = named["id"]
+                    think(f"「{named['name']}」是你课上的学生，按他来查。")
+                else:
+                    blocks.append(f"「{named['name']}」不在你本学期任课的学生名单里，我只能看你教的学生。")
+                    think(f"姓名命中但不在该老师课上，已拦住避免越权。")
+            if not t_sid:
+                n = self._match_ordinal(message)
+                if n and last and last.get("roster") and 1 <= n <= len(last["roster"]):
+                    row = last["roster"][n - 1]
+                    if any(st["id"] == row["id"] for st in my_students):
+                        t_sid = row["id"]
+                        think(f"「第{n}个」指上一轮名单里的 {row['name']}。")
+            target_sid = t_sid
+            listed = my_students[:8]
+
+            def _my_row(sid):
+                return next((st for st in my_students if st["id"] == sid), None)
+
+            if intent == "course" or any(w in message for w in ["教的课", "教什么课", "几门课", "我教什么"]):
+                think("问的是自己教的课，给课程清单。")
+                cs = tv["courses"]
+                blocks.append(f"你本学期教 {len(cs)} 门课：")
+                blocks.append("\n".join(f"- **{c['name']}**（{c.get('credit','')} 学分·{c.get('kind','')}·{c.get('period','')}）" for c in cs))
+                blocks.append(f"修这些课的学生共 {len(my_students)} 人，要看名单就说「我课上的学生」。")
+            elif any(w in message for w in ["班均", "平均", "成绩"]) and not t_sid:
+                think("问的是班级成绩，给各课期中班均。")
+                for c in tv["courses"]:
+                    scs = [st["courses"][0]["midterm"] for st in my_students
+                           if st["courses"] and st["courses"][0]["code"] == c["code"]
+                           and st["courses"][0].get("midterm") is not None]
+                    if scs:
+                        blocks.append(f"- **{c['name']}** 期中班均 {round(sum(scs) / len(scs), 1)}，最高 {max(scs)}，最低 {min(scs)}。")
+                blocks.append("想看某位学生的明细，说名字或「第 N 个」。")
+            elif intent in ("roster", "overview") or any(w in message for w in ["课上", "我教", "我的学生", "谁"]):
+                think("问的是自己课上的学生，按风险分给名单。")
+                if not my_students:
+                    blocks.append("你本学期没有任课记录（教师档案未关联到课程）。")
+                else:
+                    rows = my_students[:8]
+                    blocks.append(f"修你课的学生共 {len(my_students)} 人，按风险分排序：")
+                    blocks.append("\n".join(
+                        f"- {x['name']}（{x['class_name']}）风险分 {x['score']}（{x['level_label']}），主因 {x['top_factor']}"
+                        for x in rows))
+                    if len(my_students) > 8:
+                        blocks.append(f"… 共 {len(my_students)} 人，想看某位说名字或「第 N 个」。")
+                    if any(w in message for w in ["班均", "平均", "成绩"]):
+                        for c in tv["courses"]:
+                            scs = [st["courses"][0]["midterm"] for st in my_students
+                                   if st["courses"] and st["courses"][0]["code"] == c["code"]
+                                   and st["courses"][0].get("midterm") is not None]
+                            if scs:
+                                blocks.append(f"- **{c['name']}** 期中班均 {round(sum(scs) / len(scs), 1)}，最高 {max(scs)}，最低 {min(scs)}。")
+                        blocks.append("想看某位学生的明细，说名字或「第 N 个」。")
+            elif intent == "attendance" and t_sid:
+                row = _my_row(t_sid)
+                think(f"问的是 {row['name']} 在你课上的考勤明细。")
+                for c in row["courses"]:
+                    bad = [a for a in c.get("attendance", []) if a["status"] in ("absent", "late")]
+                    if c["absent"] or c.get("late"):
+                        detail = "；".join(
+                            f"第{a['week']}周{a['weekday']}{a['period']}（{'旷课' if a['status'] == 'absent' else a.get('note', '迟到')}）"
+                            for a in bad[:4])
+                        more = f" 等 {len(bad)} 次" if len(bad) > 4 else ""
+                        blocks.append(f"- **{c['name']}**：旷课 {c['absent']} 次、迟到 {c.get('late', 0)} 次（已上 {c.get('sessions_held', 0)} 节）——{detail}{more}")
+                blocks.append("考勤异常想反馈给辅导员，可以直接说「建议联系辅导员」。")
+            elif intent == "homework" and t_sid:
+                row = _my_row(t_sid)
+                think(f"问的是 {row['name']} 在你课上的作业明细。")
+                found = False
+                for c in row["courses"]:
+                    bad = [h for h in c.get("homework", []) if h["status"] in ("missing", "late")]
+                    for h in bad:
+                        found = True
+                        state = (f"未交（截止 {h['due']}）" if h["status"] == "missing"
+                                 else f"迟交（{h.get('submitted_at', '')[:10]} 交，截止 {h['due']}）")
+                        blocks.append(f"- **{c['name']}**「{h['title']}」：{state}")
+                if not found:
+                    blocks.append(f"{row['name']} 在你课上的作业全部按时提交，这项没问题。")
+            elif intent == "why" and t_sid:
+                row = _my_row(t_sid)
+                think(f"问的是 {row['name']} 的风险分，从他在这门课的表现拆。")
+                blocks.append(f"**{row['name']}**（{row['class_name']}）当前风险分 {row['score']}（{row['level_label']}）。")
+                blocks.append("他在你课上的表现：")
+                for c in row["courses"]:
+                    co = c.get("cohort_avg")
+                    gap = f"，低于班均 {round(co - c['midterm'], 1)} 分" if (co and c.get("midterm") is not None and c["midterm"] < co) else ""
+                    blocks.append(f"- **{c['name']}**：期中 {c.get('midterm', '—')}，缺勤 {c.get('absent', 0)} 次，作业 {c.get('hw_submitted', 0)}/{c.get('hw_assigned', 0)}{gap}。")
+                if row["score"] >= 55:
+                    blocks.append("风险偏高，主因可能在出勤或作业。建议联系辅导员一起盯，或下节课后单独谈一次。")
+            elif intent == "advice":
+                think("问的是教学层面的建议，从风险最高的学生给重点名单。")
+                red = [x for x in my_students if x["level"] == "red"]
+                yel = [x for x in my_students if x["level"] == "yellow"]
+                blocks.append(f"你课上的学生里，红色预警 {len(red)} 人、黄色关注 {len(yel)} 人。")
+                if red:
+                    blocks.append("建议重点关注的（红色）：")
+                    blocks.append("\n".join(f"- {x['name']}（{x['class_name']}）风险分 {x['score']}，主因 {x['top_factor']}" for x in red[:5]))
+                blocks.append("教学层面可做：①缺勤集中的章节下次上课前提一句考勤；②作业未交的在下节课前补交截止；③红色学生建议联系辅导员联动。")
+            elif intent == "policy":
+                think("问的是校规条款，去知识库检索。")
+                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                citations = hits
+                blocks.append(self._compose_policy(hits))
+            elif intent == "contact":
+                any_sid = my_students[0]["id"] if my_students else self.engine.students[0]["id"]
+                think("问的是任课老师联系方式，从课表带出档案。")
+                blocks.extend(self._compose_contact(any_sid, message, who=""))
+            elif t_sid:
+                row = _my_row(t_sid)
+                think(f"没有更具体指令，给 {row['name']} 在你课上的概览。")
+                blocks.append(f"**{row['name']}**（{row['class_name']}）风险分 {row['score']}（{row['level_label']}）。")
+                for c in row["courses"]:
+                    blocks.append(f"- **{c['name']}**：期中 {c.get('midterm', '—')}，缺勤 {c.get('absent', 0)} 次，作业 {c.get('hw_submitted', 0)}/{c.get('hw_assigned', 0)}。")
+            elif intent == "unknown":
+                blocks.append("这个问题我答不准。我擅长帮你看：")
+                blocks.append("- 你教的课与学生：「我教的课」「我课上的学生」「班均多少」")
+                blocks.append("- 某学生的考勤与作业：「张三缺了几次课」「李四哪次作业没交」")
+                blocks.append("- 风险研判：「谁的风险最高」「王五为什么风险分高」")
+                blocks.append("- 教学建议：「我该重点关注谁」")
+            else:
+                if my_students:
+                    red = sum(1 for x in my_students if x["level"] == "red")
+                    blocks.append(f"你本学期教 {len(tv['courses'])} 门课、{len(my_students)} 名学生，其中红色预警 {red} 人。")
+                    blocks.append("可以问我：「我课上的学生」「谁的风险最高」「某学生的考勤/作业」，或「我该重点关注谁」。")
+                else:
+                    blocks.append("你本学期没有任课记录，暂无学生数据可看。")
         else:
             # ---- 辅导员 / 教务：支持指名道姓、序数、代词、班级 ----
             if intent == "export":
@@ -558,6 +851,7 @@ class Agent:
                 think(f"要谈话要点，直接生成 {s['name']} 的完整提纲（成因分型 + 依据 + 步骤）。")
                 letter = call("counselor_brief", self.t_brief, sid=target_sid, school=school)
                 citations = letter.get("citations", [])
+                blocks.append(f"**{s['name']}**（{s['class_name']}）的谈话提纲：")
                 blocks.append(letter["body"])
                 blocks.append("提纲存为文档或直接照着谈都可以，谈完回来跟我说「记录：已完成谈话」即可归档。")
             elif intent == "overview":
@@ -612,29 +906,50 @@ class Agent:
                     else:
                         blocks.append("当前没有名次明显后退的学生。")
             elif intent == "roster":
-                cls = self._match_class(message)
-                rows = call("roster", self.t_roster, class_name=cls, level="red" if "红" in message else None, limit=40)
-                if any(w in message for w in ["上升", "变化", "趋势", "最快", "恶化"]):
-                    rows = sorted([x for x in rows if x["direction"] == "up"], key=lambda x: -x["delta"])[:6]
-                    head = "风险上升最快的 6 位学生（尚未计入红色名单的也要盯）："
+                n = self._match_ordinal(message)
+                if n and last and last.get("roster"):
+                    # 在追问上一轮名单里的第 N 位：展开那位学生，不再重拉一遍名单
+                    if target_sid:
+                        s = self.engine.get(target_sid)
+                        think(f"「第{n}个」指的是上一轮名单里的 {s['name']}（{s['class_name']}），展开他的情况。")
+                        r = call("risk_score", self.t_risk, sid=target_sid)
+                        blocks.append(self._risk_sentence(s, r))
+                        blocks.append("拆开看是这样：\n" + "\n".join(f"- {x}" for x in self._factor_detail(s, r)))
+                        blocks.append(self._compose_trend(call("grade_trend", self.t_trend, sid=target_sid)))
+                        acts = call("interventions", self.t_actions, sid=target_sid)
+                        blocks.append(f"最该先做的一件事：**{acts[0]['title']}** —— {acts[0]['detail']}（{acts[0]['deadline']}）。")
+                        blocks.append("要谈话要点说一声；谈完「记录：已完成谈话」即可归档。")
+                    else:
+                        blocks.append(f"上一轮名单里只有 {len(last['roster'])} 个人，没有第 {n} 个。")
                 else:
-                    rows = rows[:6]
-                    head = f"{cls or '全校'}风险最高的 {len(rows)} 位学生：" if cls else f"风险最高的 {len(rows)} 位学生："
-                if rows:
-                    listed = rows
-                    think(f"拉到了 {len(rows)} 条名单，按风险分排好序。")
-                    blocks.append(head)
-                    blocks.append("\n".join(
-                        f"- {x['name']}（{x['class_name']}）风险分 {x['score']}，较上学期 {x['delta']:+.0f} 分，主因 {x['top_factor']}"
-                        for x in rows))
-                    blocks.append("想深入哪位，说名字或「第 N 个」，也可以直接让我生成谈话要点。")
-                else:
-                    blocks.append("当前没有符合条件的红色预警学生。")
+                    cls = self._match_class(message)
+                    rows = call("roster", self.t_roster, class_name=cls, level="red" if "红" in message else None, limit=40)
+                    if any(w in message for w in ["上升", "变化", "趋势", "最快", "恶化"]):
+                        rows = sorted([x for x in rows if x["direction"] == "up"], key=lambda x: -x["delta"])[:6]
+                        head = "风险上升最快的 6 位学生（尚未计入红色名单的也要盯）："
+                    else:
+                        rows = rows[:6]
+                        head = f"{cls or '全校'}风险最高的 {len(rows)} 位学生：" if cls else f"风险最高的 {len(rows)} 位学生："
+                    if rows:
+                        listed = rows
+                        think(f"拉到了 {len(rows)} 条名单，按风险分排好序。")
+                        blocks.append(head)
+                        blocks.append("\n".join(
+                            f"- {x['name']}（{x['class_name']}）风险分 {x['score']}，较上学期 {x['delta']:+.0f} 分，主因 {x['top_factor']}"
+                            for x in rows))
+                        blocks.append("想深入哪位，说名字或「第 N 个」，也可以直接让我生成谈话要点。")
+                    else:
+                        blocks.append("当前没有符合条件的红色预警学生。")
             elif intent == "policy":
                 think("这问的是制度条款，去校规知识库里检索。")
                 hits = call("retrieve_policy", self.t_policy, query=message, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
+            elif intent == "contact":
+                # 导员/教务问老师联系方式：用任一学生的课表都能定位课程与教师档案
+                any_sid = target_sid or self.engine.students[0]["id"]
+                think("问的是任课老师，从课表里带出教师档案与联系方式。")
+                blocks.extend(self._compose_contact(any_sid, message, who=""))
             elif target_sid:
                 s = self.engine.get(target_sid)
                 think(f"没有更具体的指令，给 {s['name']} 一份风险拆解 + 最该做的事。")
@@ -716,7 +1031,15 @@ class Agent:
                 return ["那我最弱的一门怎么办？", "这学期还来得及补回来吗？", "我的风险分为什么这么高？"]
             if intent == "why":
                 return ["我该先做哪件事？", "导出我的告知函", "挂多少学分会被降级？"]
-            return ["我的成绩是在涨还是在掉？", "导出我的告知函", "这学期还来得及补回来吗？"]
+            if intent == "attendance":
+                return ["我哪次作业没交？", "数据结构老师的邮箱是多少？", "我的风险分为什么这么高？"]
+            if intent == "homework":
+                return ["我缺了几次课？", "这学期还来得及补回来吗？", "我的成绩是在涨还是在掉？"]
+            if intent == "contact":
+                return ["我缺了几次课？", "我哪次作业没交？", "这学期修了多少学分？"]
+            if intent == "course":
+                return ["我哪次作业没交？", "数据结构老师的答疑时间？", "我的成绩是在涨还是在掉？"]
+            return ["我的成绩是在涨还是在掉？", "我哪次作业没交？", "数据结构老师的联系方式"]
         if role == "counselor":
             if intent == "export":
                 return ["生成学期汇报 PPT", "导出干预台账", "今日日报说了什么？"]
@@ -737,6 +1060,20 @@ class Agent:
             return ["全校风险分布如何？", "今日日报说了什么？", "生成学期汇报 PPT"]
         if role == "parent":
             return ["孩子的成绩趋势怎么样？", "导出家长信", "学校什么情况下会通知家长？"]
+        if role == "teacher":
+            if intent == "roster":
+                return ["第 2 个学生的情况", "谁的风险最高？", "班均多少？"]
+            if intent == "attendance":
+                return ["他哪次作业没交？", "谁的风险最高？", "我该重点关注谁？"]
+            if intent == "homework":
+                return ["他缺了几次课？", "谁的风险最高？", "我该重点关注谁？"]
+            if intent == "why":
+                return ["我该重点关注谁？", "班均多少？", "建议联系辅导员"]
+            if intent == "advice":
+                return ["我课上的学生", "班均多少？", "谁的风险最高？"]
+            if intent == "course":
+                return ["我课上的学生", "谁的风险最高？", "班均多少？"]
+            return ["我课上的学生", "谁的风险最高？", "我该重点关注谁？"]
         return []
 
     # ---------- 主动简报：各端打开页面时智能体先开口 ----------
@@ -789,6 +1126,33 @@ class Agent:
                     {"label": "本周关注", "text": f"期中加权均分 {r['raw']['mid_avg']}（班均 {r['raw']['cohort_avg']}），缺勤 {r['raw']['absent']} 次、作业少交 {r['raw']['hw_assigned'] - r['raw']['hw_submitted']} 次。", "tone": "warn"},
                 ],
                 "asks": ["孩子的成绩趋势怎么样？", "我们家长能做什么？", "学校什么情况下会通知家长？"],
+            }
+
+        if role == "teacher":
+            teacher_name = (profile or {}).get("advisor") or (profile or {}).get("name") or ""
+            try:
+                tv = self.engine.teacher_view(teacher_name)
+                my = tv["students"]
+            except Exception:
+                my, tv = [], {"courses": []}
+            red = [x for x in my if x["level"] == "red"]
+            top = my[0] if my else None
+            pts = [
+                {"label": "任课概况",
+                 "text": f"本学期教 {len(tv['courses'])} 门课、{len(my)} 名学生，红色预警 {len(red)} 人。",
+                 "tone": "warn" if red else "ok"},
+            ]
+            if top:
+                pts.append({"label": "最高风险",
+                            "text": f"{top['name']}（{top['class_name']}）风险分 {top['score']}，主因 {top['top_factor']}。",
+                            "tone": top["level"]})
+            pts.append({"label": "教学建议",
+                        "text": "从红色学生盯起，缺勤与作业未交的优先反馈给辅导员。",
+                        "tone": "ok"})
+            return {
+                "greeting": f"{teacher_name}老师，我是你的教学助手。先看一眼你课上的情况——",
+                "points": pts,
+                "asks": ["我课上的学生", "谁的风险最高？", "我该重点关注谁？"],
             }
 
         if role == "counselor":
