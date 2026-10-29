@@ -40,22 +40,22 @@ COURSES = [
 
 # 教师档案：学生端「我的老师」直接展示，教务端可覆盖（见 engine/curriculum.py）
 TEACHERS = {
-    "周立群": {"name": "周立群", "title": "副教授", "dept": "计算机学院", "office": "信息楼 A503",
+    "周立群": {"name": "周立群", "employee_id": "2024014501", "title": "副教授", "dept": "计算机学院", "office": "信息楼 A503",
                "email": "zhoulq@cs.univ.edu.cn", "phone": "138-0013-8001",
                "office_hour": "周二 14:00-16:00", "note": "数据结构课程负责人"},
-    "何建平": {"name": "何建平", "title": "教授", "dept": "计算机学院", "office": "信息楼 A612",
+    "何建平": {"name": "何建平", "employee_id": "2024014502", "title": "教授", "dept": "计算机学院", "office": "信息楼 A612",
                "email": "hejp@cs.univ.edu.cn", "phone": "138-0013-8002",
                "office_hour": "周三 15:00-17:00", "note": "硬件方向，带实验课"},
-    "宋雅琴": {"name": "宋雅琴", "title": "副教授", "dept": "数学学院", "office": "理科楼 B208",
+    "宋雅琴": {"name": "宋雅琴", "employee_id": "2024014503", "title": "副教授", "dept": "数学学院", "office": "理科楼 B208",
                "email": "songyq@math.univ.edu.cn", "phone": "138-0013-8003",
                "office_hour": "周四 10:00-12:00", "note": ""},
-    "Linda Chen": {"name": "Linda Chen", "title": "讲师", "dept": "外国语学院", "office": "文科楼 C305",
+    "Linda Chen": {"name": "Linda Chen", "employee_id": "2024014504", "title": "讲师", "dept": "外国语学院", "office": "文科楼 C305",
                    "email": "linda.chen@fl.univ.edu.cn", "phone": "138-0013-8004",
                    "office_hour": "周四 13:00-15:00", "note": "英文授课，Office Hour 可用中文"},
-    "吴国强": {"name": "吴国强", "title": "教授", "dept": "马克思主义学院", "office": "文科楼 C110",
+    "吴国强": {"name": "吴国强", "employee_id": "2024014505", "title": "教授", "dept": "马克思主义学院", "office": "文科楼 C110",
                "email": "wugq@marx.univ.edu.cn", "phone": "138-0013-8005",
                "office_hour": "周五 14:00-16:00", "note": ""},
-    "林澈": {"name": "林澈", "title": "讲师", "dept": "计算机学院", "office": "信息楼 A518",
+    "林澈": {"name": "林澈", "employee_id": "2024014506", "title": "讲师", "dept": "计算机学院", "office": "信息楼 A518",
              "email": "linc@cs.univ.edu.cn", "phone": "138-0013-8006",
              "office_hour": "周三 19:00-20:30（线上）", "note": "选修课，项目制考核"},
 }

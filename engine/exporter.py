@@ -124,6 +124,10 @@ def md_to_docx(doc: Document, body: str):
             _set_font(r, name=FONT_HEAD, size=12, bold=True, color=BRAND)
             p.paragraph_format.space_before = Pt(10)
             p.paragraph_format.space_after = Pt(4)
+            # 必须在这里推进一步：否则同一个 "### xxx" 会继续落到下面的
+            # 列表/正文分支，被当成普通段落再输出一遍（标题重复一次）。
+            i += 1
+            continue
         # 管道表格
         elif line.startswith("|"):
             rows = []
@@ -458,6 +462,98 @@ def semester_pptx(report: dict, engine) -> io.BytesIO:
 # ---------------------------------------------------------------------------
 # 邮件：配置了 SMTP 就真发，没配置就产 .eml（双击即进邮件客户端）
 # ---------------------------------------------------------------------------
+
+def classroom_docx(payload: dict) -> io.BytesIO:
+    """课堂学情简报 → Word（教师端专属）。
+
+    和其他文书不同，这份东西不发给学生也不存档，是老师自己上课前
+    花三分钟过一遍的备忘：这门课什么水平、哪个班落后、这周该催谁。
+    所以排版上刻意压缩成两三页，表格优先。
+    """
+    t = payload.get("teacher") or {}
+    courses = payload.get("courses") or []
+    students = payload.get("students") or []
+    todos = payload.get("todos") or []
+    name = t.get("name", "任课教师")
+
+    doc = _new_doc("课堂学情简报")
+    _title(doc, "课堂学情简报",
+           f"{name}（工号 {t.get('employee_id', '—')}）· {t.get('dept', '')} · "
+           f"{payload.get('term', '')} 第 {payload.get('week', '—')} 教学周")
+
+    # summary 本身已经是「某某老师：某课共 N 人……」的完整句式，前面再叠一个
+    # 「说明：」会变成两个冒号连用，读着别扭，所以直接当首段正文。
+    body: list[str] = [payload.get("summary", ""), ""]
+
+    if courses:
+        c = courses[0]
+        body += [
+            f"### 一、{c['name']} 课堂概况",
+            "",
+            "| 指标 | 数值 | 参照 |",
+            "| --- | --- | --- |",
+            f"| 修课人数 | {c['students']} 人 | — |",
+            f"| 期中均分 | {c['mid_avg']} | 年级六门课加权 {c['grade_avg']}（差 {c['gap_grade']:+}）|",
+            f"| 及格率 | {c['pass_rate']}% | 60 分及以上 |",
+            f"| 分数区间 | {c['lowest']} – {c['highest']} | 中位数 {c['median']}、标准差 {c['std']} |",
+            f"| 课堂出勤率 | {c['attend']['rate']}% | 已上 {c['attend']['sessions']} 次课 |",
+            f"| 作业提交率 | {c['hw']['rate']}% | 已布置 {c['hw']['assigned']} 次 |",
+            "",
+            "成绩分布：",
+            "",
+            "| 区间 | 人数 | 占比 |",
+            "| --- | --- | --- |",
+            *[f"| {d['label']} | {d['count']} | {d['pct']}% |" for d in c["dist"]],
+            "",
+            "### 二、分班对比（本课堂内）",
+            "",
+            "| 班级 | 人数 | 期中均分 | 与本课均分差 | 出勤率 | 作业提交率 | 不及格 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            *[f"| {r['class_name']} | {r['students']} | {r['mid_avg']} | {r['gap']:+} | "
+              f"{round(100 - r['absent_rate'], 1)}% | {r['hw_rate']}% | {r['low']} |" for r in c["classes"]],
+            "",
+            "### 三、逐周出勤（旷课 / 迟到，按人次）",
+            "",
+            "| 教学周 | 旷课 | 迟到 |",
+            "| --- | --- | --- |",
+            *[f"| 第 {w['week']} 周 | {w['absent']} | {w['late']} |" for w in c["attend"]["weekly"]],
+            "",
+            "### 四、逐次作业提交",
+            "",
+            "| 作业 | 截止 | 已交 | 迟交 | 未交 | 提交率 |",
+            "| --- | --- | --- | --- | --- | --- |",
+            *[f"| {h['title']} | {h['due']} | {h['submitted'] - h['late']} | {h['late']} | "
+              f"{h['missing']} | {h['rate']}% |" for h in c["hw"]["items"]],
+            "",
+        ]
+
+    if todos:
+        body += ["### 五、本周待办", ""]
+        for i, td in enumerate(todos, 1):
+            body.append(f"{i}. **{td['title']}** —— {td['detail']}")
+            if td.get("names"):
+                body.append(f"   名单：{'、'.join(td['names'])}")
+            body.append(f"   建议动作：{td['action']}")
+        body.append("")
+
+    if students:
+        top = sorted(students, key=lambda s: -s["score"])[:10]
+        body += [
+            "### 六、重点关注名单（按风险分取前 10）",
+            "",
+            "| 姓名 | 班级 | 期中 | 缺勤 | 未交作业 | 风险分 | 等级 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            *[f"| {s['name']} | {s['class_name']} | {s['midterm']} | {s['absent']} 次 | "
+              f"{s['hw_missing']} 次 | {s['score']} | {s['level_label']} |" for s in top],
+            "",
+        ]
+
+    body.append("（本简报由教学助手根据本课堂数据自动汇总，指标口径以本学期已发生的"
+                "考勤、作业与期中成绩为准。）")
+    md_to_docx(doc, "\n".join(body))
+    _sign(doc, who=f"{name} · {t.get('dept', '')}")
+    return _docx_bytes(doc)
+
 
 def smtp_configured() -> bool:
     import os

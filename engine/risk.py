@@ -78,6 +78,46 @@ class RiskEngine:
     def get(self, sid: str) -> dict:
         return self._by_id[sid]
 
+    def teacher_view(self, teacher_name: str) -> dict:
+        """任课教师视角的数据：他教的课 + 上这些课的学生（每生只带该老师课的明细 + 风险分）。"""
+        my_courses: list[dict] = []
+        seen = set()
+        student_rows: list[dict] = []
+        for s in self.students:
+            my_cs = [c for c in s["courses"] if c.get("teacher") == teacher_name]
+            if not my_cs:
+                continue
+            for c in my_cs:
+                if c["code"] not in seen:
+                    seen.add(c["code"])
+                    my_courses.append({k: c.get(k) for k in
+                                       ("code", "name", "credit", "kind", "period", "teacher")})
+            try:
+                r = self.score(s["id"])
+                score, level, level_label = r["score"], r["level"], r["level_label"]
+                factors = r["factors"][:3]
+            except Exception:
+                score, level, level_label, factors = 0, "green", "正常", []
+            # 每门课只保留该老师课的考勤/作业/期中明细
+            courses_brief = [{
+                "code": c["code"], "name": c["name"], "midterm": c.get("midterm"),
+                "absent": c.get("absent", 0), "late": c.get("late", 0),
+                "sessions_held": c.get("sessions_held", 0),
+                "hw_submitted": c.get("hw_submitted", 0), "hw_assigned": c.get("hw_assigned", 0),
+                "cohort_avg": self.course_stats.get(c["code"], {}).get("mean"),
+                "attendance": c.get("attendance", []),
+                "homework": c.get("homework", []),
+            } for c in my_cs]
+            student_rows.append({
+                "id": s["id"], "name": s["name"], "class_name": s["class_name"],
+                "score": score, "level": level, "level_label": level_label,
+                "top_factor": factors[0]["label"] if factors else "",
+                "courses": courses_brief,
+            })
+        # 按风险分降序，红色优先
+        student_rows.sort(key=lambda r: -r["score"])
+        return {"teacher": teacher_name, "courses": my_courses, "students": student_rows}
+
     # ---------- 单因素计算 ----------
     def _factors(self, s: dict) -> dict:
         courses = s["courses"]
