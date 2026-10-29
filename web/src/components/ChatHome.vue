@@ -81,6 +81,28 @@ function send(text: string) {
 function submit() {
   send(draft.value);
 }
+
+// 意图是一个内部枚举值，直接贴 "unknown" 给用户看没意义。
+// 这里翻成人话：用户想知道的是「系统怎么理解我这句话的、去哪找的答案」。
+const INTENT_LABEL: Record<string, string> = {
+  risk: "查风险分",
+  roster: "查名单",
+  policy: "查校规条款",
+  attendance: "查考勤",
+  homework: "查作业",
+  overview: "查全校统计",
+  advice: "生成干预建议",
+  contact: "查任课教师",
+  letter: "生成家长信",
+  report: "生成日报",
+  unknown: "关键词没命中，交给模型判断",
+  llm_route: "模型直接作答",
+  llm_tool: "模型自己决定取哪些数据",
+};
+
+function intentLabel(v: string): string {
+  return INTENT_LABEL[v] ?? v;
+}
 </script>
 
 <template>
@@ -117,7 +139,7 @@ function submit() {
               <span v-else-if="m.pending && !m.thoughts.length" class="spinner"></span>
               <div v-if="m.error" class="chat-error">{{ m.error }}</div>
               <div v-if="m.intent && m.intent !== 'why'" class="chat-intent">
-                意图识别：{{ m.intent }}
+                意图识别：{{ intentLabel(m.intent) }}
               </div>
             </template>
           </div>

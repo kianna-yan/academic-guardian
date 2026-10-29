@@ -230,6 +230,15 @@ a {
   background: #064e3b;
   color: #6ee7b7;
 }
+/* 侧栏底部第二行：说明「取数与整理」另有一个快模型，避免以为界面上写的模型就是全部 */
+.badge-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  font-style: normal;
+  color: #8a7663;
+  letter-spacing: 0.2px;
+}
 
 /* ---------- 主区域 ---------- */
 .main {

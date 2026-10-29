@@ -396,7 +396,7 @@ export interface Meta {
     };
     school?: string;
   };
-  llm: { enabled: boolean; model: string; base_url: string };
+  llm: { enabled: boolean; model: string; base_url: string; route_model?: string };
   term: string;
   week: number;
   demo: { student: string; parent: string; counselor: string; teacher?: string };

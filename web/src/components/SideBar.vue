@@ -62,6 +62,9 @@ const roleLabel = computed(
       <span class="badge" :class="{ on: llm?.enabled }">
         {{ llm?.enabled ? `大模型已接入 · ${llm.model}` : "规则引擎模式 · 可接入大模型" }}
       </span>
+      <span v-if="llm?.enabled && llm.route_model && llm.route_model !== llm.model" class="badge-sub">
+        取数与整理：{{ llm.route_model }}
+      </span>
       <span v-if="updated">数据更新于 {{ updated }}</span>
     </div>
   </aside>

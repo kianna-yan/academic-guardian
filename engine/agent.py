@@ -107,6 +107,11 @@ PERSONAS: dict[str, str] = {
 }
 
 
+# 规则引擎「明确承认自己答不了」时用的话术。命中任意一句，说明本轮并没有
+# 真正取到有效事实——这种情况交模型重试，比把同一段清单再念一遍有用。
+_FALLBACK_MARKS = ("答不准", "我擅长帮你", "我擅长帮您看", "可以问我：")
+
+
 class Agent:
     def __init__(self, engine, kb: KnowledgeBase, store,
                  memory: ConversationMemory | None = None,
@@ -124,6 +129,24 @@ class Agent:
         # 姓名索引：240 个学生两三个字的中文姓名，直接建 dict，最长匹配优先
         self._names: dict[str, dict] = {s["name"]: s for s in engine.students}
         self._classes: list[str] = sorted({s["class_name"] for s in engine.students})
+        # 教师名与课程名：用来判断「问联系方式」这句话到底有没有指向具体对象
+        self._teacher_names: list[str] = sorted({
+            c["teacher"] for s in engine.students for c in s["courses"] if c.get("teacher")})
+        self._course_names: list[str] = sorted({
+            c["name"] for s in engine.students for c in s["courses"] if c.get("name")})
+
+    def _contact_supported(self, text: str) -> bool:
+        """问联系方式时，句子里总得有个老师名或课名，否则就是关键词误命中。
+
+        「学校机房几点关门」里有个「几点」，旧的关键词表会把它判成问老师联系方式，
+        然后答出一整页办公室和邮箱——答非所问的典型。这里兜一层。
+        """
+        if any(n in text for n in self._teacher_names):
+            return True
+        if any(n in text for n in self._course_names):
+            return True
+        return any(k in text for k in ("老师", "教师", "任课", "邮箱", "办公室",
+                                       "联系方式", "答疑", "电话", "教授"))
 
     # ---------- 工具 ----------
     def t_risk(self, sid: str) -> dict:
@@ -517,6 +540,17 @@ class Agent:
         if emit:
             emit("meta", {"intent": intent})
 
+        # ---- 规则引擎认不出的问题，交给模型自己判断该查什么 ----
+        # 这是「问几个不同问题却回同一句话」的根因修复：原来所有 unknown
+        # 都落到下面同一个 else 分支，输出的是硬编码的那段能力清单。
+        # 模型路由失败时 route() 返回 None，继续走原来的确定性链路，
+        # 所以断网、额度用完、key 没配这几种情况下行为和改造前完全一致。
+        if intent == "unknown" and llm.available():
+            from . import router as router_mod
+            routed = router_mod.route(self, role, sid, message, school, profile, emit)
+            if routed:
+                return routed
+
         # ---- 多轮：取上一轮记忆，消解这轮在说谁 ----
         last: dict | None = None
         mkey = memory_key(profile) if (profile and self.memory) else None
@@ -530,6 +564,37 @@ class Agent:
             target_sid, thought = self.resolve_target(message, role, sid, last)
             if thought:
                 think(thought)
+        elif role in ("student", "parent") and target_sid:
+            # 学生/家长只能看本人，但系统之前是「静默换成自己」——问别人的名字，
+            # 拿回来的是自己的数据，用户以为查到的是对方。这里必须先说清楚。
+            me = self.engine.get(target_sid)["name"]
+            others = [n for n in self._names if n in message and n != me]
+            if others:
+                think(f"问的是 {others[0]}，但当前账号只能看 {me} 本人，按权限只答本人。")
+                who = "孩子" if role == "parent" else "本人"
+                blocks.append(
+                    f"（说明：你问的是 **{others[0]}**，这个账号只能查看{who}的数据，"
+                    f"下面给的是 **{me}** 的情况。要看 {others[0]}，得用辅导员或教务账号。）")
+        elif role == "teacher" and (profile or {}).get("name"):
+            # 教师也一样：问到自己任教范围外的班级/专业，不能静默换成自己那门课来答，
+            # 否则用户会以为这就是他要的那个班。
+            mine = {s["class_name"] for s in self.engine.students
+                    if any(c.get("teacher") == profile["name"] for c in s.get("courses") or [])}
+            asked = [c for c in self._classes if c in message]
+            outside = [c for c in asked if c not in mine]
+            if outside:
+                think(f"问的 {outside[0]} 不在 {profile['name']} 任教的班里，先说清范围。")
+                blocks.append(
+                    f"（说明：**{outside[0]}** 不在你任教的班里——你带的是 "
+                    f"{'、'.join(sorted(mine))}，跨班数据要辅导员或教务账号才看得到。"
+                    f"下面是你自己课上的情况。）")
+            elif "软件工程" in message or "大三" in message:
+                # 「大三软件工程班」这类说法对不上库里的班级名，别硬套到自己课上
+                think("问的班级在教务系统里找不到对应，说明范围后按自己的课回答。")
+                blocks.append(
+                    "（说明：库里没有叫「大三软件工程班」的班级——现有班级是 "
+                    f"{'、'.join(self._classes)}。下面是你能看到的范围：你自己任教的课。）")
+
 
         def call(name, fn, **kwargs):
             start = time.time()
@@ -923,13 +988,25 @@ class Agent:
                         blocks.append(f"上一轮名单里只有 {len(last['roster'])} 个人，没有第 {n} 个。")
                 else:
                     cls = self._match_class(message)
-                    rows = call("roster", self.t_roster, class_name=cls, level="red" if "红" in message else None, limit=40)
+                    want_red = "红" in message
+                    rows = call("roster", self.t_roster, class_name=cls, level="red" if want_red else None, limit=40)
+                    # 把判定阈值一并写进事实段：否则润色那一步会自己发明一句
+                    # 「我不知道红色预警的分数线」，把本来算对的结论说成答不了。
+                    red_line = self.engine.config.get("red_line")
+                    scope = f"{cls}（红色预警 = 风险分 ≥ {red_line}）" if want_red and red_line else (cls or "全校")
                     if any(w in message for w in ["上升", "变化", "趋势", "最快", "恶化"]):
                         rows = sorted([x for x in rows if x["direction"] == "up"], key=lambda x: -x["delta"])[:6]
                         head = "风险上升最快的 6 位学生（尚未计入红色名单的也要盯）："
                     else:
+                        # 先记总人数再截断：只给前 6 条时，模型会怀疑「是不是还有没列出来的」，
+                        # 于是加上一句「不能断定只有这 2 人」——数据本身是全的，必须告诉它。
+                        total = len(rows)
                         rows = rows[:6]
-                        head = f"{cls or '全校'}风险最高的 {len(rows)} 位学生：" if cls else f"风险最高的 {len(rows)} 位学生："
+                        if cls:
+                            head = (f"{scope}共 {total} 人，已全部列出："
+                                    if total <= 6 else f"{scope}共 {total} 人，前 6 位：")
+                        else:
+                            head = f"风险最高的 {len(rows)} 位学生："
                     if rows:
                         listed = rows
                         think(f"拉到了 {len(rows)} 条名单，按风险分排好序。")
@@ -963,6 +1040,19 @@ class Agent:
 
         reply = "\n\n".join(blocks)
 
+        # ---- 规则引擎「看着答了、其实没信息量」的两种情形，也交给模型重试 ----
+        # 1) 走了兜底话术：六处「答不准 / 可以问我」，用户问什么都得到同一段
+        # 2) 关键词误命中：问联系方式时句子里既没有老师名也没有课名
+        #    （「学校机房几点关门」被「几点」命中了 contact，答出来是六位老师的邮箱）
+        # 认出来就交模型重试一次，它至少能说清「这个查不到」或换个角度答。
+        if llm.available() and (any(m in reply for m in _FALLBACK_MARKS)
+                                or (intent == "contact"
+                                    and not self._contact_supported(message))):
+            from . import router as router_mod
+            routed = router_mod.route(self, role, sid, message, school, profile, emit)
+            if routed:
+                return routed
+
         if llm.available():
             context = "\n".join(blocks)
             cit = "\n".join(f"- {c['citation']}：{c['text'][:120]}" for c in citations)
@@ -983,15 +1073,16 @@ class Agent:
             if emit:
                 # 流式：逐块推给前端，同时拼成完整回答
                 buf: list[str] = []
-                for piece in llm.chat_stream(messages):
+                for piece in llm.chat_stream(messages, model=llm.route_model() or None):
                     buf.append(piece)
                     emit("delta", {"text": piece})
                 polished = "".join(buf).strip() or None
             else:
-                polished = llm.chat(messages)
+                polished = llm.chat(messages, model=llm.route_model() or None)
             if polished:
                 reply = polished
-                item = {"tool": "llm_polish", "args": {"model": llm.MODEL}, "ms": 0}
+                item = {"tool": "llm_polish",
+                        "args": {"model": llm.route_model() or llm._model()}, "ms": 0}
                 trace.append(item)
                 if emit:
                     emit("tool", item)
