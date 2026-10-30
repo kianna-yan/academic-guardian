@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from engine import accounts, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
+from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
 from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
@@ -52,6 +52,8 @@ ACCOUNTS = accounts.Accounts(DATASET["students"], BASE / "data" / "accounts.json
 # 教务维护过的课程/教师档案优先于内置默认值
 CURRICULUM = curriculum.Curriculum()
 CURRICULUM.apply(DATASET)
+# 课表与课后自评：记录落 data/checkins.json，只用于学习轨迹，不进风险分
+CHECKINS = checkin.Checkins()
 # 会话记忆：多轮对话的"他 / 第 N 个"靠它消解；按账号隔离
 MEMORY = ConversationMemory()
 # 消息中心：启动时把数据集里已发生的旷课/缺交/预警播种成各端的通知与待办
@@ -88,6 +90,7 @@ def _make_agent() -> Agent:
                 "url": f"/api/export/send/{sid}?to={quote(to)}"}
 
     return Agent(ENGINE, KB, INTERVENTIONS, memory=MEMORY,
+                 checkins=CHECKINS,
                  recorder=_record_intervention,
                  mailer=_send_parent_letter,
                  reporter=lambda: report_mod.daily_report(
@@ -202,6 +205,9 @@ def _deny(profile: dict, method: str, path: str) -> str:
             return "只能查看本人/孩子的学业数据"
         if sid and method == "POST" and parts[1] == "interventions" and role == "parent":
             return "家长端仅可查看，不可提交处理记录"
+        # 课表/课后自评只能由学生本人写：家长看得到孩子的轨迹，但不能替孩子记录
+        if role == "parent" and method != "GET" and sid:
+            return "家长端仅可查看，课后记录需学生本人提交"
     elif role == "counselor":
         if path == "/api/config" and method == "POST":
             return "只有教务端可以修改预警规则"
@@ -315,8 +321,28 @@ def _entry_html() -> Path:
 _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
 
-def _entry_response() -> FileResponse:
-    return FileResponse(_entry_html(), headers=_NO_STORE)
+_ENTRY_CACHE: dict = {"mtime": 0.0, "html": ""}
+
+
+def _entry_response():
+    """返回入口 HTML。
+
+    Vite 的 base 是 "./"，产物里是 href="./assets/…"。单段路由（/student）下没问题，
+    但 /student/schedule 这种两级路径会把 "./assets/…" 解析成 /student/assets/… 而 404，
+    页面就停在骨架屏上。这里在出站时统一改成根绝对路径，深链接和刷新都能正常加载。
+    """
+    path = _entry_html()
+    if path.suffix == ".html":
+        try:
+            mtime = path.stat().st_mtime
+            if _ENTRY_CACHE["mtime"] != mtime:
+                html = path.read_text(encoding="utf-8")
+                html = html.replace('"./assets/', '"/assets/').replace("'./assets/", "'/assets/")
+                _ENTRY_CACHE.update(mtime=mtime, html=html)
+            return Response(_ENTRY_CACHE["html"], media_type="text/html", headers=_NO_STORE)
+        except OSError:
+            pass
+    return FileResponse(path, headers=_NO_STORE)
 
 
 @app.get("/")
@@ -436,6 +462,98 @@ def student_detail(sid: str):
         "grade_trend": gt,
         "interventions": INTERVENTIONS.get(sid, []),
     }
+
+
+# ---------------------------------------------------------------------------
+# 课表 / 课后自评 / 学习轨迹
+# 路径统一挂在 /api/students/{sid}/ 下，_deny 里的 target_sid() 会自动接管，
+# 学生只能读写自己的课表与记录，家长只能看不能代记。
+# ---------------------------------------------------------------------------
+class CheckinIn(BaseModel):
+    course: str
+    date: str
+    period: str
+    understand: str = "full"      # full 听懂 | fuzzy 有点模糊 | lost 没听懂
+    break_at: str = "none"        # 从什么时候开始没听懂
+    break_minute: int | None = None
+    point: str = ""
+    plan: str = "none"
+    note: str = ""
+
+
+def _require_student(sid: str) -> None:
+    if sid not in {s["id"] for s in DATASET["students"]}:
+        raise HTTPException(404, "学生不存在")
+
+
+@app.get("/api/students/{sid}/timetable")
+def student_timetable(sid: str, week: int | None = Query(None, ge=1, le=16)):
+    """某一教学周的课表：一格一节课，已上过的带出学生自己的记录。"""
+    _require_student(sid)
+    index = CHECKINS.index(sid)
+    payload = checkin.timetable(week or DATASET.get("week") or 1, index, DATASET)
+    payload["term"] = DATASET.get("term")
+    # 图例用：这门课这学期总共记了多少、断了几次，点格子时不用再查一遍
+    payload["courses"] = [
+        {
+            "code": c["code"],
+            "name": c["name"],
+            "teacher": c["teacher"],
+            "room": checkin.ROOMS.get(c["code"], ""),
+            "kind": c.get("kind", ""),
+            "credit": c.get("credit", 0),
+        }
+        for c in checkin.COURSES
+    ]
+    payload["today_sessions"] = [s for s in payload["slots"] if s["today"]]
+    return payload
+
+
+@app.get("/api/students/{sid}/checkins")
+def student_checkins(sid: str, course: str | None = Query(None)):
+    _require_student(sid)
+    rows = CHECKINS.rows(sid, course)
+    return {
+        "rows": checkin.timeline(rows),
+        "persistent": CHECKINS.persistent,
+        "states": checkin.UNDERSTAND,
+        "break_options": [{"key": k, "label": v[0]} for k, v in checkin.BREAK_AT.items()],
+        "plans": checkin.PLANS,
+        "points": checkin.POINTS,
+    }
+
+
+@app.post("/api/students/{sid}/checkin")
+def student_checkin_save(sid: str, body: CheckinIn):
+    _require_student(sid)
+    try:
+        row = CHECKINS.upsert(sid, body.model_dump())
+    except checkin.CheckinError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "record": row, "persistent": CHECKINS.persistent}
+
+
+@app.delete("/api/students/{sid}/checkin")
+def student_checkin_delete(sid: str, id: str = Query(...)):
+    _require_student(sid)
+    if not CHECKINS.remove(sid, id):
+        raise HTTPException(404, "没有这条记录")
+    return {"ok": True}
+
+
+@app.post("/api/students/{sid}/checkins/demo")
+def student_checkin_demo(sid: str):
+    """演示用：按这位学生的期中成绩生成近几周的自评记录（可随时改或删）。"""
+    _require_student(sid)
+    added = CHECKINS.demo(sid)
+    return {"ok": True, "added": added}
+
+
+@app.get("/api/students/{sid}/track")
+def student_track(sid: str):
+    """学习轨迹：每门课一条线，标出断点从哪开始、哪一节接上。"""
+    _require_student(sid)
+    return checkin.track(sid, CHECKINS.rows(sid), DATASET)
 
 
 @app.get("/api/curriculum")

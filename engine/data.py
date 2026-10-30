@@ -29,7 +29,7 @@ COURSES = [
     {"code": "CS203", "name": "计算机组成原理", "credit": 4, "kind": "必修", "teacher": "何建平", "period": "周二 3-4 节", "weeks": 16,
      "slots": [(1, "3-4 节"), (3, "1-2 节")]},
     {"code": "MA204", "name": "概率论与数理统计", "credit": 3, "kind": "必修", "teacher": "宋雅琴", "period": "周三 1-2 节", "weeks": 16,
-     "slots": [(2, "1-2 节"), (4, "3-4 节")]},
+     "slots": [(2, "1-2 节"), (4, "5-6 节")]},
     {"code": "EN203", "name": "大学英语 III", "credit": 2, "kind": "必修", "teacher": "Linda Chen", "period": "周四 5-6 节", "weeks": 16,
      "slots": [(3, "5-6 节"), (0, "7-8 节")]},
     {"code": "PE201", "name": "马克思主义基本原理", "credit": 3, "kind": "必修", "teacher": "吴国强", "period": "周五 3-4 节", "weeks": 16,

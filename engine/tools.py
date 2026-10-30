@@ -69,6 +69,17 @@ _SPEC: dict[str, dict] = {
         "required": ["name"],
         "roles": ALL_ROLES,
     },
+    "get_learning_track": {
+        "desc": "查询一名学生在学生端做的课后自评与学习轨迹：哪门课从第几周开始连续没听懂（断点）、"
+                "卡在哪个知识点、从第几分钟开始没跟上、后面有没有接上，以及这周记了几节、还差几节。"
+                "问「我从哪节课开始没听懂」「我的学习轨迹怎么样」「哪门课最该补」时用这个。"
+                "这些是学生自己的判断，不参与风险分，也不能当处分依据。",
+        "params": {
+            "name": {"type": "string", "description": "学生姓名或学号"},
+        },
+        "required": ["name"],
+        "roles": ALL_ROLES,
+    },
     "get_roster": {
         "desc": "查询风险名单：可按班级或预警等级筛选，返回风险分最高的若干人及总人数。"
                 "问「谁最危险」「红色预警有几个人」「计科2402 班情况」时用这个。",
@@ -323,6 +334,61 @@ def _t_get_courses(agent, role, sid, args):
     return {"ok": True, "data": {"姓名": stu["name"], "在修课程": out}}
 
 
+def _t_get_learning_track(agent, role, sid, args):
+    """课后自评 → 学习轨迹。数据来自学生自己每节课后的记录，不进风险分。"""
+    stu, err = _target(agent, role, sid, args)
+    if err:
+        return err
+    store = getattr(agent, "checkins", None)
+    if store is None:
+        return {"ok": False, "note": "课后自评记录还没接入，查不到学习轨迹。"}
+
+    from . import checkin as checkin_mod
+    from .data import db as _db
+
+    meta = _db()
+    rows = store.rows(stu["id"])
+    t = checkin_mod.track(stu["id"], rows, {"week": meta.get("week", 8), "term": meta.get("term", "")})
+    if not t["stats"]["recorded"]:
+        return {"ok": True, "data": {
+            "姓名": stu["name"], "记录条数": 0,
+            "说明": "这位学生还没做过课后自评，学习轨迹是空的。让他下课后在「我的课表」里点一节已经上过的课记一句就行。",
+        }}
+
+    label = {"break": "有断点还没接上", "watch": "零星几节没跟上", "ok": "跟得上", "empty": "没记录"}
+    courses = []
+    for c in t["courses"]:
+        if not c["recorded"]:
+            continue
+        courses.append({
+            "课": c["name"],
+            "记录": f"{c['recorded']}/{c['held']} 节",
+            "状态": label.get(c["status"], c["status"]),
+            "判断": c["line"],
+            "断点": [
+                {
+                    "起始周": b["start_week"], "起始日期": b["start_date"],
+                    "连续节数": b["count"],
+                    "从什么时候开始": "上课一开始" if b["minute_from"] <= 0 else f"第 {b['minute_from']} 分钟",
+                    "卡在": b["point"] or "未填",
+                    "是否接上": "还没接上" if b["open"] else f"第 {b['recovered_week']} 周接上了",
+                }
+                for b in c["breaks"][:2]
+            ],
+        })
+    return {"ok": True, "data": {
+        "姓名": stu["name"],
+        "记录条数": t["stats"]["recorded"],
+        "覆盖率": f"{round(t['stats']['coverage'] * 100)}%",
+        "未接上的断点": t["stats"]["open_breaks"],
+        "已接上的断点": t["stats"]["fixed_breaks"],
+        "本周记录": f"{t['stats']['week_done']}/{t['stats']['week_due']} 节",
+        "各课轨迹": courses[:MAX_ROWS],
+        "可以做的事": [a["title"] for a in t["advice"]][:4],
+        "口径": "以上都是学生课后的自评，只用于看趋势，不参与风险分，也不作为处分依据。",
+    }}
+
+
 def _t_get_roster(agent, role, sid, args):
     level = (args.get("level") or "").strip() or None
     cls = (args.get("class_name") or "").strip() or None
@@ -436,6 +502,7 @@ _HANDLERS = {
     "get_risk": _t_get_risk,
     "get_attendance": _t_get_attendance,
     "get_homework": _t_get_homework,
+    "get_learning_track": _t_get_learning_track,
     "get_courses": _t_get_courses,
     "get_roster": _t_get_roster,
     "get_overview": _t_get_overview,

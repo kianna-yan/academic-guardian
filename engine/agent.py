@@ -115,7 +115,7 @@ _FALLBACK_MARKS = ("答不准", "我擅长帮你", "我擅长帮您看", "可以
 class Agent:
     def __init__(self, engine, kb: KnowledgeBase, store,
                  memory: ConversationMemory | None = None,
-                 recorder=None, mailer=None, reporter=None):
+                 recorder=None, mailer=None, reporter=None, checkins=None):
         self.engine = engine
         self.kb = kb
         self.store = store
@@ -126,6 +126,8 @@ class Agent:
         self.mailer = mailer
         # reporter() -> report dict：每日日报聚合（定时任务同款）
         self.reporter = reporter
+        # checkins：学生课后自评记录库，只用于「学习轨迹」这个工具，不进风险分
+        self.checkins = checkins
         # 姓名索引：240 个学生两三个字的中文姓名，直接建 dict，最长匹配优先
         self._names: dict[str, dict] = {s["name"]: s for s in engine.students}
         self._classes: list[str] = sorted({s["class_name"] for s in engine.students})
