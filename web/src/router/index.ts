@@ -25,7 +25,25 @@ const router = createRouter({
       path: "/student",
       name: "student",
       component: () => import("@/views/StudentView.vue"),
-      meta: { title: "学生端", sub: "看清自己的学业状态，并拿到可执行的补救路径", role: "student" },
+      meta: { title: "学情总览", sub: "看清自己的学业状态，并拿到可执行的补救路径", role: "student" },
+    },
+    {
+      path: "/student/schedule",
+      name: "student-schedule",
+      component: () => import("@/views/ScheduleView.vue"),
+      meta: { title: "我的课表", sub: "这周上什么、在哪上、哪一节还没记", role: "student" },
+    },
+    {
+      path: "/student/checkin",
+      name: "student-checkin",
+      component: () => import("@/views/CheckinView.vue"),
+      meta: { title: "课后打卡", sub: "每节课后 10 秒：听懂没有、从哪儿开始没懂", role: "student" },
+    },
+    {
+      path: "/student/track",
+      name: "student-track",
+      component: () => import("@/views/TrackView.vue"),
+      meta: { title: "学习轨迹", sub: "每门课一条线：断在哪、后来接上没有", role: "student" },
     },
     {
       path: "/counselor",
@@ -53,7 +71,9 @@ const router = createRouter({
     },
     { path: "/:pathMatch(.*)*", redirect: "/student" },
   ],
-  scrollBehavior() {
+  scrollBehavior(to) {
+    // 锚点由 afterEach 处理（滚动容器是 .view，不是 window）
+    if (to.hash) return false;
     return { top: 0 };
   },
 });
@@ -89,8 +109,15 @@ router.beforeEach(async (to) => {
 router.afterEach((to) => {
   const title = (to.meta?.title as string) || "学业护航";
   document.title = `${title} · 学业护航`;
-  // 视图区自身滚动，路由切换后回到顶部
+  // 视图区自身滚动，路由切换后回到顶部；带锚点则滚到对应区块
   requestAnimationFrame(() => {
+    if (to.hash) {
+      const el = document.querySelector(to.hash);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+    }
     document.querySelector(".view")?.scrollTo({ top: 0 });
   });
 });

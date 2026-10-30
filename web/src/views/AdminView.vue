@@ -7,6 +7,7 @@ import ClassCompare from "@/components/ClassCompare.vue";
 import DashNav from "@/components/DashNav.vue";
 import DistDonut from "@/components/DistDonut.vue";
 import FactorBars from "@/components/FactorBars.vue";
+import RegionBand from "@/components/RegionBand.vue";
 import StatGrid from "@/components/StatGrid.vue";
 import { useAppStore } from "@/stores/app";
 import { useChatStore } from "@/stores/chat";
@@ -271,6 +272,9 @@ async function exportCSV() {
       <button class="btn primary" @click="downloadDoc('/api/export/semester')">学期汇报 PPT</button>
     </div>
 
+    <RegionBand id="board" no="01" title="全校看板" tone="archive"
+      desc="日报、风险分布、班级对比——一屏看完这所学校现在什么状态" />
+
     <!-- 每日预警日报：定时任务与对话共用同一份聚合，这里展示它说了什么 -->
     <div v-if="daily" class="card">
       <div class="card-head">
@@ -322,7 +326,10 @@ async function exportCSV() {
     <div v-else class="skeleton" style="height: 180px"></div>
   </div>
 
-  <div class="card mt">
+  <RegionBand id="rules" no="02" title="预警规则" tone="risk"
+    desc="红黄线一拖，全校当场重算；规则变了，名单和文书跟着变" />
+
+  <div class="card">
     <div class="card-head">
       <h3>预警规则配置</h3>
       <span class="hint">修改后立即重算全校，可用于“一校一规”</span>
@@ -354,7 +361,10 @@ async function exportCSV() {
     </div>
   </div>
 
-  <div class="card mt">
+  <RegionBand id="accounts" no="03" title="账号与权限" tone="learn"
+    desc="批量开学生账号，学号不在学情库里的会逐行报错" />
+
+  <div class="card">
     <div class="card-head">
       <h3>学生账号 · 批量开通</h3>
       <span class="hint">
@@ -422,7 +432,10 @@ async function exportCSV() {
     </div>
   </div>
 
-  <div class="card mt">
+  <RegionBand id="curriculum" no="04" title="课程与教师档案" tone="ai"
+    desc="学生端「我的任课老师」直接读这里，改完即时生效" />
+
+  <div class="card">
     <div class="card-head">
       <h3>课程与教师 · 导入</h3>
       <span class="hint">学生端「我的任课老师」直接读这里</span>

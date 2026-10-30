@@ -43,6 +43,9 @@ watch(
       notices.start();
       stopArrive?.();
       stopArrive = notices.onArrive((items) => {
+        // 手机端不弹右下角通知：顶部导航只有 40px 高，弹窗一盖就把入口挡住了，
+        // 消息本来就靠右上角铃铛上的红点提示，不必再抢一次注意力。
+        if (window.innerWidth <= 760) return;
         for (const n of items.slice(0, 3)) {
           ElNotification({
             title: n.title,

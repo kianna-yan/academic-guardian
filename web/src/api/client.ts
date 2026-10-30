@@ -6,6 +6,8 @@ import type {
   AuthProfile,
   ChatAnswer,
   ChatTrace,
+  CheckinList,
+  CheckinRecord,
   Citation,
   CurriculumImportResult,
   CurriculumPayload,
@@ -22,7 +24,9 @@ import type {
   StudentDetail,
   TeacherClassroom,
   TeacherView,
+  TimetablePayload,
   TodoItem,
+  TrackPayload,
 } from "@/types";
 
 /* ------------------------------------------------------------------
@@ -160,6 +164,29 @@ export const api = {
   students: (params: { class_name?: string; level?: string; limit?: number } = {}) =>
     get<{ total: number; rows: RosterRow[] }>("/students", { params }),
   student: (sid: string) => get<StudentDetail>(`/students/${sid}`),
+  /* ---- 课表 / 课后自评 / 学习轨迹 ---- */
+  timetable: (sid: string, week?: number) =>
+    get<TimetablePayload>(`/students/${sid}/timetable`, { params: week ? { week } : {} }),
+  checkins: (sid: string, course?: string) =>
+    get<CheckinList>(`/students/${sid}/checkins`, { params: course ? { course } : {} }),
+  saveCheckin: (
+    sid: string,
+    body: {
+      course: string;
+      date: string;
+      period: string;
+      understand: string;
+      break_at: string;
+      break_minute?: number | null;
+      point: string;
+      plan: string;
+      note: string;
+    },
+  ) => post<{ ok: boolean; record: CheckinRecord; persistent: boolean }>(`/students/${sid}/checkin`, body),
+  deleteCheckin: (sid: string, id: string) =>
+    http.delete<{ ok: boolean }>(`/students/${sid}/checkin`, { params: { id } }).then((r) => r.data),
+  demoTrack: (sid: string) => post<{ ok: boolean; added: number }>(`/students/${sid}/checkins/demo`, {}),
+  track: (sid: string) => get<TrackPayload>(`/students/${sid}/track`),
   teacherView: () => get<TeacherView>("/teacher/view"),
   /** 课堂学情：以「我教的这门课」为统计单位 */
   teacherClassroom: () => get<TeacherClassroom>("/teacher/classroom"),

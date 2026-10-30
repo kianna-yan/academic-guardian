@@ -6,6 +6,7 @@ import ActionList from "@/components/ActionList.vue";
 import ChatHome from "@/components/ChatHome.vue";
 import CourseTrend from "@/components/CourseTrend.vue";
 import DashNav from "@/components/DashNav.vue";
+import RegionBand from "@/components/RegionBand.vue";
 import FactorBars from "@/components/FactorBars.vue";
 import GradeTrend from "@/components/GradeTrend.vue";
 import RiskRing from "@/components/RiskRing.vue";
@@ -192,6 +193,9 @@ async function submitAppeal() {
   </div>
 
   <div v-else-if="detail">
+    <RegionBand no="01" title="学业总览" tone="risk"
+      desc="六因素加权算出来的一个数，每一分的来源都能往下追" />
+
     <!-- 风险主卡 -->
     <div class="card risk-hero" :class="detail.risk.level">
       <div class="ring-wrap">
@@ -235,7 +239,10 @@ async function submitAppeal() {
     </div>
 
     <!-- 成绩走势：五个学期一条线，外加本学期每门课的测评 -->
-    <div v-if="gradeTrend && gradeTrend.terms.length" class="card mt">
+    <RegionBand id="grade" no="02" title="成绩与趋势" tone="archive"
+      desc="五个学期一条线，外加本学期每门课的测评走势" />
+
+    <div v-if="gradeTrend && gradeTrend.terms.length" class="card">
       <div class="card-head">
         <h3>成绩走势 · 从大一到这学期</h3>
         <div class="head-side">
@@ -276,7 +283,10 @@ async function submitAppeal() {
     </div>
 
     <!-- 因素 / 行动 -->
-    <div class="two-col mt">
+    <RegionBand id="risk" no="03" title="风险归因与行动" tone="risk"
+      desc="为什么是这个等级，以及这周具体做哪几件事" />
+
+    <div class="two-col">
       <div class="card">
         <div class="card-head">
           <h3>风险从哪里来</h3>
@@ -298,7 +308,10 @@ async function submitAppeal() {
     </div>
 
     <!-- 课程明细 -->
-    <div class="card mt">
+    <RegionBand id="records" no="04" title="课程 · 考勤 · 作业" tone="archive"
+      desc="每门课的挂科概率、逐日考勤、作业截止与任课老师联系方式" />
+
+    <div class="card">
       <div class="card-head">
         <h3>课程风险明细</h3>
         <span class="hint">挂科概率由期中成绩、作业与出勤共同估算</span>
@@ -348,7 +361,7 @@ async function submitAppeal() {
     </div>
 
     <!-- 我的老师：每门课的任课教师与联系方式 -->
-    <div class="card mt">
+    <div class="card">
       <div class="card-head">
         <h3>我的任课老师</h3>
         <span class="hint">{{ myCourses.length }} 门课 · 联系方式由教务维护</span>
@@ -406,7 +419,7 @@ async function submitAppeal() {
     </div>
 
     <!-- 考勤记录：哪一天、哪门课、第几节，一眼能对上 -->
-    <div class="card mt">
+    <div class="card">
       <div class="card-head">
         <h3>课堂考勤 · 具体到每一天</h3>
         <span class="hint">累计旷课 {{ attendanceStats.absent }} 次 · 迟到 {{ attendanceStats.late }} 次</span>
@@ -447,7 +460,7 @@ async function submitAppeal() {
     </div>
 
     <!-- 作业清单：要交什么、什么时候交、交没交 -->
-    <div class="card mt">
+    <div class="card">
       <div class="card-head">
         <h3>作业清单 · 要交什么写清楚</h3>
         <span class="hint">
@@ -479,7 +492,10 @@ async function submitAppeal() {
     </div>
 
     <!-- 申诉入口：AI 不能单方面决定学生命运 -->
-    <div class="card mt">
+    <RegionBand id="appeal" no="05" title="复核与异议" tone="ai"
+      desc="任何预警都要经过人工核实，十秒就能提一条" />
+
+    <div class="card">
       <div class="card-head">
         <h3>对数据或评分有异议？</h3>
         <span class="hint">任何预警都要经过人工核实</span>

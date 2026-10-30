@@ -127,7 +127,7 @@ async function openLetter() {
       </div>
     </div>
 
-    <div class="two-col mt">
+    <div id="overview" class="two-col mt">
       <div class="card">
         <div class="card-head">
           <h3>学校正在做什么</h3>

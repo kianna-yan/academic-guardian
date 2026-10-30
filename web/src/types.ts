@@ -634,3 +634,180 @@ export interface TeacherClassroom {
   todos: ClassroomTodo[];
   summary: string;
 }
+
+/* ------------------------------------------------------------------
+ * 课表 / 课后自评 / 学习轨迹
+ * 三块共用「一节课」这个单位：课表是它摆在哪，自评是它的状态，
+ * 轨迹是把这些状态按时间连起来看走向。
+ * ---------------------------------------------------------------- */
+export type Understand = "full" | "fuzzy" | "lost";
+
+export interface LessonSlot {
+  course: string;
+  name: string;
+  teacher: string;
+  kind: string;
+  credit: number;
+  room: string;
+  date: string;
+  week: number;
+  weekday: number;
+  weekday_label: string;
+  period: string;
+  index: number;
+  /** 已经上过（含今天）＝可以记录 */
+  held: boolean;
+  today: boolean;
+  recorded: boolean;
+  state: Understand | "";
+  state_label: string;
+  break_label: string;
+  point: string;
+  plan_label: string;
+  note: string;
+  checkin_id: string;
+}
+
+export interface TimetablePayload {
+  week: number;
+  weeks: { min: number; max: number; current: number };
+  today: string;
+  term: string;
+  days: { key: number; label: string; date: string; today: boolean }[];
+  periods: string[];
+  cells: Record<string, LessonSlot[]>;
+  slots: LessonSlot[];
+  today_sessions: LessonSlot[];
+  stats: { total: number; held: number; checked: number; pending: number };
+  courses: { code: string; name: string; teacher: string; room: string; kind: string; credit: number }[];
+}
+
+export interface CheckinRecord {
+  id: string;
+  course: string;
+  course_name: string;
+  teacher?: string;
+  room?: string;
+  date: string;
+  week: number;
+  weekday?: string;
+  period: string;
+  state: Understand;
+  state_label: string;
+  break_label: string;
+  minute_from: number;
+  point: string;
+  plan: string;
+  plan_label: string;
+  note: string;
+  updated_at: string;
+}
+
+export interface CheckinList {
+  rows: CheckinRecord[];
+  persistent: boolean;
+  states: Record<Understand, { label: string; short: string; level: number }>;
+  break_options: { key: string; label: string }[];
+  plans: Record<string, string>;
+  points: Record<string, string[]>;
+}
+
+export interface TrackPoint {
+  index: number;
+  date: string;
+  week: number;
+  weekday: string;
+  period: string;
+  state: Understand | "";
+  recorded: boolean;
+  minute_from: number;
+  break_label: string;
+  point: string;
+  plan: string;
+  plan_label: string;
+  note: string;
+  id: string;
+  updated_at: string;
+}
+
+export interface TrackBreak {
+  start_index: number;
+  end_index: number;
+  count: number;
+  start_week: number;
+  start_date: string;
+  end_date: string;
+  point: string;
+  minute_from: number;
+  open: boolean;
+  /** 接上的那一节在 points 里的位置（没有就是 null） */
+  recovered_index?: number | null;
+  recovered_week?: number | null;
+  recovered_date?: string;
+  state_after?: string;
+}
+
+export interface TrackCourse {
+  code: string;
+  name: string;
+  teacher: string;
+  teacher_profile: TeacherProfile;
+  period: string;
+  room: string;
+  kind: string;
+  credit: number;
+  points: TrackPoint[];
+  segments: { state: Understand | "none"; from: number; to: number; count: number; dates: string[] }[];
+  breaks: TrackBreak[];
+  open_breaks: number;
+  fixed_breaks: number;
+  held: number;
+  recorded: number;
+  full: number;
+  fuzzy: number;
+  lost: number;
+  status: "break" | "watch" | "ok" | "empty";
+  line: string;
+  latest: TrackPoint | null;
+}
+
+export interface TrackPayload {
+  courses: TrackCourse[];
+  timeline: CheckinRecord[];
+  due: {
+    course: string;
+    course_name: string;
+    teacher: string;
+    room: string;
+    date: string;
+    week: number;
+    weekday: string;
+    period: string;
+    today: boolean;
+  }[];
+  advice: {
+    kind: string;
+    course: string;
+    course_name: string;
+    title: string;
+    text: string;
+    who: string;
+    office_hour: string;
+    email: string;
+  }[];
+  stats: {
+    held: number;
+    recorded: number;
+    coverage: number;
+    open_breaks: number;
+    fixed_breaks: number;
+    due: number;
+    week: number;
+    week_due: number;
+    week_done: number;
+    streak: number;
+    courses: number;
+    today: string;
+  };
+  meta: { week: number; term: string; persistent: boolean };
+}

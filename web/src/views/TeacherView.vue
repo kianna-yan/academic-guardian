@@ -173,7 +173,7 @@ const profile = computed(() => room.value?.teacher || null);
 
     <template v-else-if="room && course">
       <!-- ① 教师身份 + 我的课程：六位数工号各看各的课，这里直接标出来 -->
-      <section class="card hero">
+      <section id="classroom" class="card hero">
         <div class="hero-left">
           <div class="avatar">{{ (profile?.name || auth.profile?.name || "师").slice(0, 1) }}</div>
           <div class="who">

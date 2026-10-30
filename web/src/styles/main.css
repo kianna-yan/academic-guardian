@@ -671,6 +671,14 @@ a {
 .mt {
   margin-top: 14px;
 }
+/* 同一区域内相邻卡片自动留间距：加了区域标带之后不必每张卡都写 mt */
+.card + .card {
+  margin-top: 14px;
+}
+.two-col + .card,
+.three-col + .card {
+  margin-top: 14px;
+}
 
 /* 表单 */
 .field {

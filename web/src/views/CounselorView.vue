@@ -5,6 +5,7 @@ import { api, downloadDoc } from "@/api/client";
 import ChatHome from "@/components/ChatHome.vue";
 import DashNav from "@/components/DashNav.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
+import RegionBand from "@/components/RegionBand.vue";
 import StatGrid from "@/components/StatGrid.vue";
 import StudentDrawer from "@/components/StudentDrawer.vue";
 import TrendSpark from "@/components/TrendSpark.vue";
@@ -139,6 +140,9 @@ async function openLetter(type: "student" | "counselor") {
     </div>
 
   <StatGrid :items="stats" />
+
+  <RegionBand id="roster" no="01" title="风险名单" tone="risk"
+    desc="按风险分排序，点一行看画像与这周先做什么" />
 
   <div class="card">
     <div class="card-head">
