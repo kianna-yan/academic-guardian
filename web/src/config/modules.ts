@@ -24,7 +24,7 @@ export interface NavGroup {
 
 /**
  * 模块分区：按"什么时候用"分组，而不是按开发顺序罗列。
- * - 学生端：学习空间（每节课都在用）→ 学业档案（看结果）→ AI 顾问（随时问）
+ * - 学生端：学习空间（每节课都在用）→ 我的成长（看得见）→ 学业档案（看结果）→ AI 顾问（随时问）
  * - 其他端：各自的业务区域，锚点对应页面里的区块
  */
 export const MODULES: Record<Role, NavGroup[]> = {
@@ -37,6 +37,15 @@ export const MODULES: Record<Role, NavGroup[]> = {
         { key: "schedule", label: "我的课表", to: "/student/schedule", hint: "这周哪几节、在哪上、记过没有" },
         { key: "checkin", label: "课后打卡", to: "/student/checkin", hint: "10 秒记一句：听懂没有、从哪儿开始没懂", badge: "checkin" },
         { key: "track", label: "学习轨迹", to: "/student/track", hint: "每门课一条线，断在哪一眼看见" },
+      ],
+    },
+    {
+      key: "growth",
+      label: "我的成长",
+      caption: "看得见",
+      items: [
+        { key: "tree", label: "我的智慧树", to: "/student/tree", hint: "一颗果实一门课，颜色看学科、光环看风险" },
+        { key: "simulate", label: "成绩分配试算", to: "/student/simulate", hint: "每一项你自己调，实时看会不会挂" },
       ],
     },
     {

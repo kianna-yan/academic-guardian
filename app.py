@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, trend
+from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, simulator, trend
 from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
@@ -54,6 +54,8 @@ CURRICULUM = curriculum.Curriculum()
 CURRICULUM.apply(DATASET)
 # 课表与课后自评：记录落 data/checkins.json，只用于学习轨迹，不进风险分
 CHECKINS = checkin.Checkins()
+# 成绩试算方案：学生自己调的分配落 data/simulations.json，只存分数与权重
+SIMS = simulator.Simulations(BASE / "data" / "simulations.json")
 # 会话记忆：多轮对话的"他 / 第 N 个"靠它消解；按账号隔离
 MEMORY = ConversationMemory()
 # 消息中心：启动时把数据集里已发生的旷课/缺交/预警播种成各端的通知与待办
@@ -308,6 +310,28 @@ def _demo_students() -> dict:
             "teacher": "2024014501"}
 
 
+def _seed_demo_checkins() -> None:
+    """演示用：默认演示学生名下没有课后记录时，先生成一份。
+
+    登录页的「学生」提示按钮登录的正是 _demo_students() 选出来的这位同学，
+    他如果一条记录都没有，学习轨迹首次打开就是空的，看起来像功能坏了。
+    只补空账号，已有记录一律不动——学生自己写的永远优先。
+    """
+    try:
+        demo = _demo_students()
+        for sid in dict.fromkeys([demo["student"], demo["parent"]]):
+            if not CHECKINS.rows(sid):
+                added = CHECKINS.demo(sid)
+                if added:
+                    print(f"[演示] 已为 {sid} 生成 {added} 条课后记录")
+    except Exception as exc:  # noqa: BLE001
+        # 示例数据只影响演示效果，绝不能因为它在启动阶段把服务拦下来
+        print(f"[演示] 课后记录初始化跳过：{exc}")
+
+
+_seed_demo_checkins()
+
+
 def _entry_html() -> Path:
     """优先返回 Vite 构建产物；没有构建时回退到旧版 static/，方便随时回滚。"""
     if (DIST / "index.html").exists():
@@ -554,6 +578,42 @@ def student_track(sid: str):
     """学习轨迹：每门课一条线，标出断点从哪开始、哪一节接上。"""
     _require_student(sid)
     return checkin.track(sid, CHECKINS.rows(sid), DATASET)
+
+
+# ---------------------------------------------------------------------------
+# 成绩分配试算
+# 权重按课程性质给默认方案，起点分全部来自学生自己的真实明细（随堂测/期中/出勤/作业）。
+# 结论不下发：前端改一下滑杆就重算，省一次往返；保存的是"分配方案"本身。
+# ---------------------------------------------------------------------------
+class SimPlanIn(BaseModel):
+    scores: dict[str, float] = {}
+    weights: dict[str, float] = {}
+
+
+class SimSaveIn(BaseModel):
+    plans: dict[str, SimPlanIn] = {}
+    action: str = "save"      # save 保存 | reset 清空回到初始分配
+
+
+@app.get("/api/students/{sid}/simulate")
+def student_simulate(sid: str):
+    _require_student(sid)
+    student = ENGINE.get(sid)
+    payload = simulator.payload(student, ENGINE.score(sid), DATASET.get("term"))
+    payload["saved"] = SIMS.get(sid)
+    payload["persistent"] = SIMS.persistent
+    return payload
+
+
+@app.post("/api/students/{sid}/simulate")
+def student_simulate_save(sid: str, body: SimSaveIn):
+    _require_student(sid)
+    stamp = datetime.now().strftime("%m-%d %H:%M")
+    if body.action == "reset":
+        saved = SIMS.clear(sid)
+    else:
+        saved = SIMS.save(sid, {code: p.model_dump() for code, p in body.plans.items()}, stamp)
+    return {"ok": True, "saved": saved, "persistent": SIMS.persistent}
 
 
 @app.get("/api/curriculum")

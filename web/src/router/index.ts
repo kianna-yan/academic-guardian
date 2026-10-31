@@ -46,6 +46,18 @@ const router = createRouter({
       meta: { title: "学习轨迹", sub: "每门课一条线：断在哪、后来接上没有", role: "student" },
     },
     {
+      path: "/student/tree",
+      name: "student-tree",
+      component: () => import("@/views/TreeView.vue"),
+      meta: { title: "我的智慧树", sub: "一颗果实一门课：颜色看学科，光环看风险", role: "student" },
+    },
+    {
+      path: "/student/simulate",
+      name: "student-simulate",
+      component: () => import("@/views/SimulatorView.vue"),
+      meta: { title: "成绩分配试算", sub: "每一项你自己定，最后看这门课会不会挂", role: "student" },
+    },
+    {
       path: "/counselor",
       name: "counselor",
       component: () => import("@/views/CounselorView.vue"),

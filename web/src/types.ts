@@ -811,3 +811,68 @@ export interface TrackPayload {
   };
   meta: { week: number; term: string; persistent: boolean };
 }
+
+/* ------------------------------------------------------------------ */
+/* 成绩分配试算：每门课一套考核构成，学生自己调每一项能拿多少分        */
+/* ------------------------------------------------------------------ */
+export interface SimComponent {
+  key: string;
+  label: string;
+  short: string;
+  weight: number;
+  base: number;
+  basis: string;
+}
+
+export interface SimCourse {
+  code: string;
+  name: string;
+  teacher: string;
+  credit: number;
+  kind: string;
+  scheme: string;
+  scheme_label: string;
+  components: SimComponent[];
+  base_total: number;
+  base_level: string;
+  base_level_label: string;
+  needed_final: number;
+  fail_probability: number;
+  cohort_avg: number | null;
+}
+
+export interface SimPlan {
+  scores: Record<string, number>;
+  weights: Record<string, number>;
+}
+
+export interface SimPayload {
+  student: { id: string; name: string; class_name: string; term: string };
+  pass_line: number;
+  final_guard: number;
+  courses: SimCourse[];
+  base: {
+    avg: number;
+    gpa: number;
+    credits: number;
+    failing: number;
+    failing_codes: string[];
+    level: string;
+  };
+  saved: { plans: Record<string, SimPlan>; saved_at: string | null };
+  persistent: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* 智慧树：一颗果实一门课                                              */
+/* ------------------------------------------------------------------ */
+export interface TreeFruit {
+  code: string;
+  name: string;
+  credit: number;
+  score: number;
+  fail: number;
+  status: "great" | "ok" | "watch" | "risk";
+  /** 树上第几个挂点；不传则按数组顺序 */
+  slot?: number;
+}

@@ -21,6 +21,7 @@ import type {
   Overview,
   Role,
   RosterRow,
+  SimPayload,
   StudentDetail,
   TeacherClassroom,
   TeacherView,
@@ -187,6 +188,16 @@ export const api = {
     http.delete<{ ok: boolean }>(`/students/${sid}/checkin`, { params: { id } }).then((r) => r.data),
   demoTrack: (sid: string) => post<{ ok: boolean; added: number }>(`/students/${sid}/checkins/demo`, {}),
   track: (sid: string) => get<TrackPayload>(`/students/${sid}/track`),
+  /* ---- 成绩分配试算 ---- */
+  simulate: (sid: string) => get<SimPayload>(`/students/${sid}/simulate`),
+  saveSimulation: (
+    sid: string,
+    body: { plans: Record<string, { scores: Record<string, number>; weights: Record<string, number> }>; action?: "save" | "reset" },
+  ) =>
+    post<{ ok: boolean; saved: SimPayload["saved"]; persistent: boolean }>(`/students/${sid}/simulate`, {
+      action: "save",
+      ...body,
+    }),
   teacherView: () => get<TeacherView>("/teacher/view"),
   /** 课堂学情：以「我教的这门课」为统计单位 */
   teacherClassroom: () => get<TeacherClassroom>("/teacher/classroom"),

@@ -48,6 +48,7 @@ declare module 'vue' {
     TraceSteps: typeof import('./components/TraceSteps.vue')['default']
     TrendSpark: typeof import('./components/TrendSpark.vue')['default']
     WeeklyAttend: typeof import('./components/WeeklyAttend.vue')['default']
+    WisdomTree: typeof import('./components/WisdomTree.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

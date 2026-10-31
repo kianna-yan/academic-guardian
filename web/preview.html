@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学业预警智能体</title>
+  <!--
+    应用卡片的本地入口页。
+
+    为什么需要它：卡片预览面板只能托管静态文件，起不了 app.py 那个 Python 后端，
+    直接挂 web/site/index.html 的话，登录请求打到没有服务端的本地静态服务上，
+    返回一句纯文本 “Not Found”，看起来像应用坏了。
+
+    所以这里只做一件事：把面板导航到线上完整版（带分享码）。
+    换应用/换链接时，改下面 LIVE_URL 一处即可。
+  -->
+  <style>
+    :root {
+      --bg: #faf5ee;
+      --ink: #3b2e24;
+      --muted: #8e7a66;
+      --line: #eadfcd;
+      --accent: #c2410c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .box {
+      width: 100%;
+      max-width: 420px;
+      padding: 28px 26px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fffdf9;
+      box-shadow: 0 10px 30px rgba(59, 46, 36, 0.06);
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 19px;
+      letter-spacing: 0.02em;
+    }
+    .sub { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+    .bar {
+      height: 3px;
+      margin: 0 0 18px;
+      border-radius: 2px;
+      background: var(--line);
+      overflow: hidden;
+    }
+    .bar i {
+      display: block;
+      width: 38%;
+      height: 100%;
+      background: var(--accent);
+      animation: slide 1.15s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(360%); }
+    }
+    .btn {
+      display: block;
+      padding: 12px 18px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .btn:hover { filter: brightness(1.05); }
+    .hint {
+      margin: 16px 0 0;
+      padding-top: 14px;
+      border-top: 1px dashed var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.9;
+      text-align: left;
+    }
+    .hint b { color: var(--ink); font-weight: 600; }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #f3ece2;
+      font-size: 12px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bar i { animation: none; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>学业预警智能体</h1>
+    <p class="sub">正在打开线上完整版…</p>
+    <div class="bar"><i></i></div>
+    <a class="btn" id="open" href="#">没自动跳转？点这里打开</a>
+    <p class="hint">
+      <b>为什么不在面板里直接登录：</b>这个应用带 Python 后端（<code>app.py</code>），
+      而卡片预览只能托管静态文件，后端不在那里跑，所以登录会失败。
+      <br />
+      <b>演示账号：</b>学生 <code>学号 / 0000</code> · 辅导员 <code>2024014589 / 1111</code> ·
+      教务 <code>1234567899 / 2222</code>
+    </p>
+  </div>
+  <script>
+    var LIVE_URL = "https://academic-guardian-pro.app.workbuddy.host/?sharecode=AR4PJJ6RXQ";
+    document.getElementById("open").href = LIVE_URL;
+    // 留一小段时间让上面的骨架露一下脸，避免面板里闪一下就没了
+    setTimeout(function () {
+      try {
+        location.replace(LIVE_URL);
+      } catch (e) {
+        /* 面板禁用了跳转时，用户点按钮即可 */
+      }
+    }, 500);
+  </script>
+</body>
+</html>
