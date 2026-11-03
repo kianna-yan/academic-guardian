@@ -10,8 +10,9 @@ export interface NavItem {
   hint?: string;
   /** AI 对话入口：不走路由，切回对话主界面 */
   chat?: boolean;
-  /** 徽标：待打卡的节数由页面自己写进 store，这里只标记位置 */
-  badge?: "checkin";
+  /** 徽标：待打卡的节数由页面自己写进 store，这里只标记位置；
+   *  messages 表示家校沟通未读数（由 notices store 提供） */
+  badge?: "checkin" | "messages";
 }
 
 export interface NavGroup {
@@ -46,6 +47,7 @@ export const MODULES: Record<Role, NavGroup[]> = {
       items: [
         { key: "tree", label: "我的智慧树", to: "/student/tree", hint: "一颗果实一门课，颜色看学科、光环看风险" },
         { key: "simulate", label: "成绩分配试算", to: "/student/simulate", hint: "每一项你自己调，实时看会不会挂" },
+        { key: "resources", label: "学习资源", to: "/student/resources", hint: "老师上传的历年真题与网课" },
       ],
     },
     {
@@ -68,16 +70,26 @@ export const MODULES: Record<Role, NavGroup[]> = {
   ],
   counselor: [
     {
+      key: "contact",
+      label: "家校沟通",
+      caption: "联系家长",
+      items: [
+        { key: "messages", label: "家校沟通", to: "/messages", hint: "与各学生家长的直接对话，按学生分组，点谁和谁聊", badge: "messages" },
+      ],
+    },
+    {
       key: "work",
       label: "班级工作台",
       caption: "本周先做",
       items: [
         { key: "roster", label: "风险名单", to: "/counselor#roster", hint: "按风险排序，一人一句先做哪件事" },
+        { key: "forest", label: "智慧森林", to: "/counselor#forest", hint: "每个学生一棵树，每班一片森林：颜色一眼看出整体长势" },
       ],
     },
     {
       key: "ai",
       label: "AI 顾问",
+      caption: "随时问",
       items: [{ key: "chat", label: "辅导员对话", to: "/counselor", chat: true, hint: "批量问、点名问都行" }],
     },
   ],
@@ -99,6 +111,12 @@ export const MODULES: Record<Role, NavGroup[]> = {
         { key: "curriculum", label: "课程与教师", to: "/admin#curriculum", hint: "导入任课教师与联系方式" },
       ],
     },
+    {
+      key: "ai",
+      label: "AI 顾问",
+      caption: "随时问",
+      items: [{ key: "chat", label: "教务对话", to: "/admin", chat: true, hint: "全校统计、规则口径与校规条款，问我就行" }],
+    },
   ],
   teacher: [
     {
@@ -106,17 +124,46 @@ export const MODULES: Record<Role, NavGroup[]> = {
       label: "课堂",
       caption: "任课视角",
       items: [
-        { key: "view", label: "课堂学情", to: "/teacher#classroom", hint: "分数分布、出勤、作业、待办" },
+        { key: "view", label: "课堂学情", to: "/teacher#classroom", hint: "分数分布、出勤、作业、待办（按班级分组）" },
       ],
+    },
+    {
+      key: "resources",
+      label: "教学资源",
+      caption: "给学生用",
+      items: [
+        { key: "exams", label: "历年真题", to: "/teacher/resources", hint: "上传历年期末试卷与参考答案给学生复习" },
+        { key: "tutorials", label: "网课资源", to: "/teacher/resources", hint: "上传网课视频/讲义给学生自学" },
+      ],
+    },
+    {
+      key: "ai",
+      label: "AI 顾问",
+      caption: "随时问",
+      items: [{ key: "chat", label: "教学对话", to: "/teacher", chat: true, hint: "我课上学生的考勤、作业与风险，问我就行" }],
     },
   ],
   parent: [
+    {
+      key: "contact",
+      label: "家校沟通",
+      caption: "直接联系",
+      items: [
+        { key: "messages", label: "家校沟通", to: "/messages", hint: "与孩子辅导员的直接对话，消息实时可见", badge: "messages" },
+      ],
+    },
     {
       key: "child",
       label: "孩子情况",
       items: [
         { key: "overview", label: "状态解读", to: "/parent#overview", hint: "学校已做什么、家里可以怎么配合" },
       ],
+    },
+    {
+      key: "ai",
+      label: "AI 顾问",
+      caption: "随时问",
+      items: [{ key: "chat", label: "家校对话", to: "/parent", chat: true, hint: "孩子这学期怎么样，用通俗的话讲给你听" }],
     },
   ],
 };

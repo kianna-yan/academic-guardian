@@ -1,0 +1,24 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8600";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const browser = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--disable-gpu", "--no-sandbox"] });
+const page = await browser.newPage();
+await page.setViewport({ width: 1280, height: 860 });
+await page.goto(`${BASE}/login`, { waitUntil: "networkidle2" });
+await page.evaluate(() => localStorage.clear());
+await page.goto(`${BASE}/login`, { waitUntil: "networkidle2" });
+await sleep(900);
+await page.screenshot({ path: "shots_fix/09-login-final.png" });
+// 辅导员端看板态：确认「回到 AI 对话」在非学生端也在
+const rows = await page.$$(".hint-row");
+await rows[1].click();
+await sleep(200);
+await page.click(".submit");
+await page.waitForFunction(() => !location.pathname.includes("login"), { timeout: 20000 });
+await sleep(2200);
+await page.evaluate(() => [...document.querySelectorAll(".mod-item")].find((e) => e.innerText.includes("风险名单"))?.click());
+await sleep(1000);
+await page.screenshot({ path: "shots_fix/10-counselor-dash.png" });
+console.log(await page.evaluate(() => ({ dashNav: !!document.querySelector(".dash-nav"), text: document.querySelector(".dash-nav")?.innerText })));
+await browser.close();

@@ -10,6 +10,8 @@ import type {
   CheckinRecord,
   Citation,
   CurriculumImportResult,
+  MessageItem,
+  MessageThread,
   CurriculumPayload,
   ImportResult,
   Intervention,
@@ -24,6 +26,7 @@ import type {
   SimPayload,
   StudentDetail,
   TeacherClassroom,
+  TeacherResource,
   TeacherView,
   TimetablePayload,
   TodoItem,
@@ -241,7 +244,52 @@ export const api = {
   appeals: () => get<{ items: AppealItem[] }>("/appeals"),
   resolveAppeal: (id: string, body: { action: "accept" | "reject"; reply: string }) =>
     post<{ ok: boolean; appeal: AppealItem }>(`/appeals/${id}/resolve`, body),
+  // 家长端 ↔ 辅导员端 双向消息
+  messages: () => get<{ threads: MessageThread[]; unread: number }>("/messages"),
+  sendMessage: (sid: string, text: string) =>
+    post<{ ok: boolean; message: MessageItem }>("/messages/send", { sid, text }),
+  markMessagesRead: (thread_id: string) =>
+    post<{ ok: boolean; marked: number }>("/messages/read", { thread_id }),
+
+  // 教师上传的真题/网课资源（教师上传、学生下载）
+  teacherResources: (kind: "" | "exam" | "tutorial" = "") =>
+    get<{ items: TeacherResource[] }>(
+      "/teacher/resources" + (kind ? `?kind=${kind}` : ""),
+    ),
+  deleteTeacherResource: (id: string) =>
+    http.delete<{ ok: boolean }>(`/teacher/resources/${id}`).then((r) => r.data),
 };
+
+// 上传资源：multipart/form-data 不能走 JSON，单独写一个
+// axios 的请求拦截器会自动带上 sharecode 与 token，所以这里不必再拼。
+export async function uploadTeacherResource(
+  file: File,
+  fields: { kind: "exam" | "tutorial"; course?: string; class_name?: string; note?: string },
+): Promise<{ ok: boolean; item: TeacherResource }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("kind", fields.kind);
+  if (fields.course) fd.append("course", fields.course);
+  if (fields.class_name) fd.append("class_name", fields.class_name);
+  if (fields.note) fd.append("note", fields.note);
+  const { data } = await http.post<{ ok: boolean; item: TeacherResource }>(
+    "/teacher/resources",
+    fd,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
+// 下载资源：<a>/window.open 直接触发，token 走 ag_token query
+export function downloadTeacherResource(id: string): void {
+  const token = getToken();
+  const params = new URLSearchParams();
+  if (SHARE_CODE) params.set("sharecode", SHARE_CODE);
+  if (token) params.set("ag_token", token);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  // 用 _blank 让浏览器直接弹下载，避免覆盖当前页
+  window.open(`/api/teacher/resources/${id}/download${qs}`, "_blank", "noopener");
+}
 
 /* ------------------------------------------------------------------
  * 文书下载：/api/export/* 的 <a>/window.open 直接触发，token 走 ag_token query。

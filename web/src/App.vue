@@ -9,7 +9,7 @@ import SideBar from "@/components/SideBar.vue";
 import TopBar from "@/components/TopBar.vue";
 import { fetchLlmStatus, type LlmStatus } from "@/api/client";
 import { useAppStore } from "@/stores/app";
-import { useAuthStore } from "@/stores/auth";
+import { useAuthStore, HOME_OF } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import { useNoticeStore } from "@/stores/notices";
 import type { Role } from "@/types";
@@ -23,16 +23,29 @@ const pwdOpen = ref(false);
 
 const isLogin = computed(() => route.name === "login");
 const role = computed<Role>(() => auth.profile?.role ?? "student");
+/**
+ * view-chat（overflow:hidden 的整页对话模式）只在「当前路由就是该角色主入口」
+ * 且 homeMode==='chat' 时才加。否则从 /student（chat）跳到 /student/tree 等子页时，
+ * homeMode 还是 'chat'，view-chat 仍生效，子页被 overflow:hidden 锁住划不动。
+ */
+const isChatRoute = computed(() => route.path === HOME_OF[role.value]);
+const chatMode = computed(() => chat.homeMode === "chat" && isChatRoute.value);
 
 // 切端 / 换账号时都重置对话面板：角色和账号任一变化都要换会话，
 // 否则同角色换账号（学生 A 退出 → 学生 B 登录）会短暂看到上一人的消息
 watch(
   () => `${role.value}:${auth.profile?.account ?? ""}`,
-  (key) => {
-    if (!isLogin.value) chat.ensure(key.split(":")[0] as Role);
+  () => {
+    if (!isLogin.value && auth.profile) chat.ensure(role.value);
   },
   { immediate: true },
 );
+
+// 登录时是「身份先到、路由后跳」，上面那个 watch 触发时还停在登录页会直接跳过，
+// 于是辅导员/家长端进来看到的是学生端的问候语和建议词。这里在离开登录页时补一次。
+watch(isLogin, (login) => {
+  if (!login && auth.profile) chat.ensure(role.value);
+});
 
 // ---- 消息中心：登录后开始轮询，退出即停；新通知到 → 右下角弹窗 ----
 let stopArrive: (() => void) | null = null;
@@ -51,7 +64,9 @@ watch(
             title: n.title,
             message: n.text,
             type: n.kind === "appeal_new" || n.kind === "absent" ? "warning" : "info",
-            duration: 6000,
+            // 永久停留，直到使用者主动叉掉——重要消息不会被一闪而过错过
+            duration: 0,
+            showClose: true,
           });
         }
       });
@@ -146,7 +161,7 @@ onUnmounted(() => {
     <main class="main">
       <TopBar @change-password="pwdOpen = true" />
 
-      <section class="view" :class="{ 'view-chat': chat.homeMode === 'chat' }">
+      <section class="view" :class="{ 'view-chat': chatMode }">
         <!-- 大模型掉线：显式说明一句，否则回答变生硬会被当成系统坏了 -->
         <div v-if="llmOff" class="llm-banner">
           <span class="llm-dot" aria-hidden="true"></span>

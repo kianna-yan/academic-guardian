@@ -3,9 +3,11 @@ import { computed, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { MODULES, ROLE_LABEL } from "@/config/modules";
 import { useAppStore } from "@/stores/app";
-import { useAuthStore } from "@/stores/auth";
+import { HOME_OF, useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
+import { useNoticeStore } from "@/stores/notices";
 import type { NavItem } from "@/config/modules";
+import type { Role } from "@/types";
 
 /**
  * 侧栏：身份 → 模块分区 → 学期与数据源 → 状态。
@@ -15,6 +17,7 @@ import type { NavItem } from "@/config/modules";
 const app = useAppStore();
 const auth = useAuthStore();
 const chat = useChatStore();
+const notices = useNoticeStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -22,10 +25,12 @@ const term = computed(() => app.meta?.term ?? "—");
 const week = computed(() => app.meta?.week ?? 0);
 const updated = computed(() => app.meta?.updated_at ?? "");
 const llm = computed(() => app.meta?.llm);
-const role = computed(() => auth.profile?.role ?? "student");
+const role = computed<Role>(() => auth.profile?.role ?? "student");
 const roleLabel = computed(() => ROLE_LABEL[role.value] || "");
 const groups = computed(() => MODULES[role.value] || []);
-const inChat = computed(() => chat.homeMode === "chat" && route.path === "/student");
+/** 本端的首页：整页对话就落在这个地址上，五个端各不相同 */
+const homePath = computed(() => HOME_OF[role.value] || "/student");
+const inChat = computed(() => chat.homeMode === "chat" && route.path === homePath.value);
 
 function isActive(item: NavItem) {
   if (item.chat) return inChat.value;
@@ -37,12 +42,13 @@ function isActive(item: NavItem) {
 
 function goChat() {
   chat.homeMode = "chat";
-  if (route.path !== "/student") router.push("/student");
+  if (route.path !== homePath.value) router.push(homePath.value);
 }
 
 /**
  * 同一路由只变锚点时路由不会重新渲染，得自己滚过去；
- * 另外从「对话」模式点进学情页要先把看板切回来，否则滚不到区块。
+ * 另外从「对话」模式点进看板页要先把看板切回来，否则页面停在对话上、锚点根本不存在。
+ * 这里按角色取各自的首页地址，五个端共用同一套逻辑（以前只判 /student，其他端点不动）。
  */
 async function onNav(item: NavItem, e: MouseEvent) {
   if (item.chat) {
@@ -51,7 +57,7 @@ async function onNav(item: NavItem, e: MouseEvent) {
     return;
   }
   const [path, hash] = item.to.split("#");
-  if (path === "/student" && chat.homeMode === "chat") chat.homeMode = "dash";
+  if (path === homePath.value && chat.homeMode === "chat") chat.homeMode = "dash";
   if (!hash || route.path !== path) return; // 跨页面交给 router，afterEach 里滚
   e.preventDefault();
   await nextTick();
@@ -95,6 +101,9 @@ async function onNav(item: NavItem, e: MouseEvent) {
             @click="onNav(it, $event)">
             <i class="mi-dot"></i>
             <span class="mi-text">{{ it.label }}</span>
+            <span v-if="it.badge === 'messages' && notices.messageUnread" class="mi-unread">
+              {{ notices.messageUnread > 99 ? "99+" : notices.messageUnread }}
+            </span>
           </router-link>
         </template>
       </div>
@@ -265,6 +274,21 @@ async function onNav(item: NavItem, e: MouseEvent) {
 .mod-item.active .mi-tag {
   border-color: rgba(255, 255, 255, 0.5);
   color: #fff;
+}
+/* 家校沟通未读小红点：侧栏一眼能看出有没有新消息 */
+.mi-unread {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  line-height: 1;
 }
 
 /* 手机端：侧栏变成顶部条，模块导航横向滚动 */

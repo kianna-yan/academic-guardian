@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { api, downloadDoc } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
 import FactorBars from "@/components/FactorBars.vue";
@@ -15,6 +16,7 @@ const emit = defineEmits<{
 }>();
 
 const chat = useChatStore();
+const router = useRouter();
 
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(false);
@@ -33,6 +35,16 @@ function askTrend() {
   if (!props.sid || !detail.value) return;
   const name = detail.value.student.name;
   chat.ask("counselor", props.sid, `${name} 的成绩走势说明什么？该重点关注哪门课？`);
+}
+
+/**
+ * 跳到这名学生的家校沟通窗口：带上 sid，让 MessageView 自动选中这条会话。
+ * 不在抽屉里塞一个迷你聊天框——长对话塞在 520px 抽屉里太挤，不如直接进整页。
+ */
+function contactParent() {
+  if (!props.sid) return;
+  visible.value = false;
+  router.push({ path: "/messages", query: { sid: props.sid } });
 }
 
 async function load(sid: string) {
@@ -100,8 +112,9 @@ async function addNote() {
           <div class="drawer-exports">
             <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=counselor`)">谈话要点</button>
             <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=student`)">告知函</button>
-            <button class="chip" @click="downloadDoc(`/api/export/notice/${sid}`)">通知书</button>
             <button class="chip" @click="downloadDoc(`/api/export/letter/${sid}?type=parent`)">家长信</button>
+            <!-- 直接联系该生家长：跳到对应家校沟通会话 -->
+            <button class="chip chip-msg" @click="contactParent">家校沟通 →</button>
           </div>
         </div>
       </div>
@@ -416,5 +429,15 @@ async function addNote() {
 }
 .drawer-exports .chip {
   cursor: pointer;
+}
+/* 家校沟通入口：用品牌色强调，让导员一眼看到“直接联系家长”的快捷键 */
+.drawer-exports .chip-msg {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+.drawer-exports .chip-msg:hover {
+  filter: brightness(1.08);
 }
 </style>

@@ -81,6 +81,24 @@ const router = createRouter({
       component: () => import("@/views/TeacherView.vue"),
       meta: { title: "教师端", sub: "任课视角的课堂学情与风险研判", role: "teacher" },
     },
+    {
+      path: "/teacher/resources",
+      name: "teacher-resources",
+      component: () => import("@/views/ResourceView.vue"),
+      meta: { title: "教学资源", sub: "上传历年真题与网课给学生", role: "teacher" },
+    },
+    {
+      path: "/student/resources",
+      name: "student-resources",
+      component: () => import("@/views/ResourceView.vue"),
+      meta: { title: "学习资源", sub: "老师上传的真题与网课", role: "student" },
+    },
+    {
+      path: "/messages",
+      name: "messages",
+      component: () => import("@/views/MessageView.vue"),
+      meta: { title: "家校沟通", sub: "家长与辅导员直接对话，双向实时可见", roles: ["parent", "counselor"] },
+    },
     { path: "/:pathMatch(.*)*", redirect: "/student" },
   ],
   scrollBehavior(to) {
@@ -115,6 +133,11 @@ router.beforeEach(async (to) => {
     // 越界的地址直接送回自己的端，并给出提示（由目标页读取 query 提示）
     return withShare(`${HOME_OF[auth.profile.role]}?blocked=${encodeURIComponent(String(to.name))}`);
   }
+  // 多角色限制：家校沟通 parent / counselor 都可进，其他角色挡回自己端
+  const allowed = to.meta?.roles as string[] | undefined;
+  if (allowed && allowed.length && !allowed.includes(auth.profile.role)) {
+    return withShare(`${HOME_OF[auth.profile.role]}?blocked=${encodeURIComponent(String(to.name))}`);
+  }
   return true;
 });
 
@@ -122,15 +145,24 @@ router.afterEach((to) => {
   const title = (to.meta?.title as string) || "学业护航";
   document.title = `${title} · 学业护航`;
   // 视图区自身滚动，路由切换后回到顶部；带锚点则滚到对应区块
+  // 用双层 rAF 等组件挂载完毕；并强制 .view 重排一次，
+  // 否则从 chat 模式（overflow:hidden）切到普通页（overflow:auto）时
+  // 浏览器不会立即刷新滚动状态，会出现“首次进入划不动”的卡顿。
   requestAnimationFrame(() => {
-    if (to.hash) {
-      const el = document.querySelector(to.hash);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
+    requestAnimationFrame(() => {
+      const view = document.querySelector(".view") as HTMLElement | null;
+      if (!view) return;
+      // 触发一次 reflow，让 overflow 状态切换被浏览器立即生效
+      void view.offsetHeight;
+      if (to.hash) {
+        const el = document.querySelector(to.hash);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
       }
-    }
-    document.querySelector(".view")?.scrollTo({ top: 0 });
+      view.scrollTo({ top: 0 });
+    });
   });
 });
 

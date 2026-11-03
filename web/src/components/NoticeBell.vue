@@ -7,6 +7,13 @@ import { useAuthStore } from "@/stores/auth";
 import { useNoticeStore } from "@/stores/notices";
 import type { AppealItem } from "@/types";
 
+/**
+ * 右上角铃铛：通知 / 待办 / 异议 三个 tab。
+ *
+ * 家校沟通原来也藏在这里的一个 tab 里，入口太隐蔽——现已提升为
+ * 左侧棕色导航栏的一级入口（家长端、辅导员端各一个「家校沟通」
+ * 菜单项，带未读红点），点进去是整页对话界面。这里不再重复放一份。
+ */
 const auth = useAuthStore();
 const notices = useNoticeStore();
 
@@ -19,6 +26,7 @@ const KIND_ICON: Record<string, string> = {
   talk: "💬",
   attendance: "🚫",
   appeal: "🙋",
+  message: "✉️",
 };
 
 const role = computed(() => auth.profile?.role || "");
@@ -39,7 +47,9 @@ const pendingAppeals = computed(() => appeals.value.filter((a) => a.status === "
 
 function toggle() {
   notices.panelOpen = !notices.panelOpen;
-  if (notices.panelOpen) void loadAppeals();
+  if (notices.panelOpen) {
+    void loadAppeals();
+  }
 }
 
 function openNotice(id: string) {
@@ -149,7 +159,7 @@ function statusLabel(s: string) {
         </template>
 
         <!-- 异议（导员/教务） -->
-        <template v-else>
+        <template v-else-if="notices.tab === 'appeals'">
           <div v-if="!appeals.length" class="empty">还没有学生提交异议。</div>
           <div v-for="a in appeals" :key="a.id" class="item appeal">
             <span class="ico">{{ a.status === "pending" ? "🙋" : a.status === "accepted" ? "✅" : "🚫" }}</span>

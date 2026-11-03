@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore, HOME_OF } from "@/stores/auth";
@@ -73,11 +73,30 @@ const demoStudent = computed(() => app.meta?.demo?.student || "20240067");
 const demoParent = computed(() => app.meta?.demo?.parent || demoStudent.value);
 const demoTeacher = computed(() => app.meta?.demo?.teacher || "2024014501");
 
-/** 切换入口时清空密码，避免把学生密码带进教务端 */
-watch(active, () => {
+/**
+ * 初始密码表：五个端一张表列全，跟登录接口里的 DEFAULT_PASSWORD 一一对应
+ * （0000 学生 / 1111 辅导员 / 2222 教务 / 3333 家长 / 4444 教师）。
+ * 之前漏了教师端，演示时只能靠猜，这里补齐并统一成「端口 · 账号 · 密码」三列。
+ */
+const HINTS = computed<{ key: Role; icon: string; name: string; account: string; password: string }[]>(() => [
+  { key: "student", icon: "学", name: "学生端", account: demoStudent.value, password: "0000" },
+  { key: "counselor", icon: "辅", name: "辅导员端", account: "2024014589", password: "1111" },
+  { key: "admin", icon: "教", name: "教务端", account: "1234567899", password: "2222" },
+  { key: "parent", icon: "家", name: "家长端", account: "孩子学号", password: "3333" },
+  { key: "teacher", icon: "师", name: "教师端", account: demoTeacher.value, password: "4444" },
+]);
+
+/**
+ * 切换入口：清掉上一端的密码，避免把学生密码带进教务端。
+ * 必须写成显式函数而不是 watch(active)——下拉表里的「点一行自动填入」也是先改 active 再填值，
+ * 用 watch 的话清空动作会排在填值之后，把刚填好的密码又抹掉（演示时表现为「请输入密码」）。
+ */
+function switchRole(key: Role) {
+  if (key === active.value) return;
+  active.value = key;
   form.password = "";
   error.value = "";
-});
+}
 
 onMounted(() => {
   // 从被拦截的地址过来时，提示一下而不是默默跳走
@@ -181,7 +200,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
             :class="{ active: active === e.key }"
             role="tab"
             :aria-selected="active === e.key"
-            @click="active = e.key"
+            @click="switchRole(e.key)"
           >
             <span class="tab-icon">{{ e.icon }}</span>
             <span>{{ e.name }}</span>
@@ -229,26 +248,30 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
             <b>初始密码</b>
             <span>首次登录后请及时修改，右上角可改</span>
           </div>
-          <div class="hint-grid">
-            <button class="hint-item" type="button" @click="fill('student')">
-              <span>学生</span>
-              <em>学号 / 0000</em>
-            </button>
-            <button class="hint-item" type="button" @click="fill('counselor')">
-              <span>辅导员</span>
-              <em>2024014589 / 1111</em>
-            </button>
-            <button class="hint-item" type="button" @click="fill('admin')">
-              <span>教务</span>
-              <em>1234567899 / 2222</em>
-            </button>
-            <button class="hint-item" type="button" @click="fill('parent')">
-              <span>家长</span>
-              <em>孩子学号 / 3333</em>
-            </button>
+          <div class="hint-cols" aria-hidden="true">
+            <span></span>
+            <span>端口</span>
+            <span>账号</span>
+            <span class="ta-r">初始密码</span>
           </div>
+          <ul class="hint-list">
+            <li v-for="h in HINTS" :key="h.key">
+              <button
+                class="hint-row"
+                :class="{ on: active === h.key }"
+                type="button"
+                :title="`点击填入${h.name}的账号与初始密码`"
+                @click="fill(h.key)"
+              >
+                <span class="hr-ico">{{ h.icon }}</span>
+                <span class="hr-name">{{ h.name }}</span>
+                <span class="hr-acc">{{ h.account }}</span>
+                <span class="hr-pwd">{{ h.password }}</span>
+              </button>
+            </li>
+          </ul>
           <p class="hint-foot">
-            演示学号 <b>{{ demoStudent }}</b>（点上面任意一项可自动填入，直接登录即可）
+            点任意一行自动填入账号与初始密码，直接登录即可 · 演示学号 <b>{{ demoStudent }}</b>
           </p>
         </div>
       </section>
@@ -381,8 +404,9 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 }
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  /* 五个端口一行排齐：写死 4 列会让教师端掉到第二行，看着像多余的第 5 项 */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
   background: #faf6ee;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -393,12 +417,13 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 8px 4px;
+  padding: 7px 2px;
   border: 0;
   border-radius: 9px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
@@ -528,37 +553,84 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   font-size: 11.5px;
   color: var(--muted);
 }
-.hint-grid {
+.hint-cols {
   margin-top: 10px;
+  padding: 0 9px 4px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 16px 58px minmax(0, 1fr) 58px;
   gap: 8px;
+  align-items: center;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
 }
-.hint-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 10px;
+.hint-cols .ta-r {
+  text-align: right;
+}
+.hint-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+.hint-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 16px 58px minmax(0, 1fr) 58px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 9px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fbf7ef;
   cursor: pointer;
   text-align: left;
+  transition: border-color 0.14s, background 0.14s;
 }
-.hint-item:hover {
+.hint-row:hover {
   border-color: #f0d9b5;
   background: #fdf4e6;
 }
-.hint-item span {
-  font-size: 11.5px;
+/* 当前选中的端口高亮，和上面的 tab 呼应 */
+.hint-row.on {
+  border-color: var(--brand);
+  background: #fdf1de;
+}
+.hr-ico {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  background: #f0e6d6;
   color: var(--muted);
 }
-.hint-item em {
-  font-style: normal;
+.hint-row.on .hr-ico {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.hr-name {
   font-size: 12.5px;
   color: var(--text);
+  white-space: nowrap;
+}
+.hr-acc {
+  font-size: 12px;
+  color: var(--text-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hr-pwd {
+  justify-self: end;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--brand);
+  font-variant-numeric: tabular-nums;
 }
 .hint-foot {
   margin: 10px 0 0;
@@ -586,8 +658,14 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   .login-card {
     padding: 18px 16px 16px;
   }
-  .hint-grid {
-    grid-template-columns: 1fr;
+  .tab {
+    font-size: 11px;
+    padding: 6px 0;
+  }
+  .hint-cols,
+  .hint-row {
+    grid-template-columns: 14px 50px minmax(0, 1fr) 44px;
+    gap: 6px;
   }
 }
 </style>

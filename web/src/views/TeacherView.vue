@@ -40,6 +40,10 @@ const filter = ref<"all" | "risk" | "hw" | "absent" | "behind">("all");
 const sortBy = ref<"risk" | "mid" | "absent" | "hw">("risk");
 const kw = ref("");
 const doneTodos = ref<Set<string>>(new Set());
+// 班级筛选：默认空=全部，选某个班后名单只显示该班。
+// 教师端原本所有班的学生混在一张表里，看哪个班都得靠搜索框，
+// 现在加上下拉与班级概览卡片，所教各班分开排版。
+const classFilter = ref("");
 
 const panel = reactive<{ open: boolean; stu: ClassroomStudent | null }>({
   open: false,
@@ -53,9 +57,39 @@ const course = computed(() => {
 
 const allStudents = computed(() => room.value?.students || []);
 
+/** 当前课程下的所有班级（按名称排序，下拉与班级概览用） */
+const classOptions = computed(() => {
+  const set = new Set<string>();
+  for (const s of allStudents.value) {
+    if (s.class_name) set.add(s.class_name);
+  }
+  return [...set].sort();
+});
+
+/** 按班级分组：每个班的人数 + 红黄绿风险分布 + 平均分（用来铺一排班级卡片） */
+const classGroups = computed(() => {
+  const map = new Map<string, typeof allStudents.value>();
+  for (const s of allStudents.value) {
+    const k = s.class_name || "未分班";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(s);
+  }
+  return [...map.entries()].map(([name, list]) => {
+    const red = list.filter((s) => s.level === "red").length;
+    const yellow = list.filter((s) => s.level === "yellow").length;
+    const green = list.filter((s) => s.level === "green").length;
+    const avg = list.length
+      ? Math.round(list.reduce((a, b) => a + b.score, 0) / list.length)
+      : 0;
+    return { name, total: list.length, red, yellow, green, avg };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+});
+
 /** 课堂内排名/连旷等字段后端已算好，这里只做筛选与排序 */
 const rows = computed(() => {
   let list = [...allStudents.value];
+  // 班级筛选优先于其他维度
+  if (classFilter.value) list = list.filter((s) => s.class_name === classFilter.value);
   const f = filter.value;
   if (f === "risk") list = list.filter((s) => s.level !== "green");
   else if (f === "hw") list = list.filter((s) => s.hw_missing > 0);
@@ -222,6 +256,43 @@ const profile = computed(() => room.value?.teacher || null);
       <!-- ② 课堂概况：六项都以「这门课」为单位 -->
       <StatGrid :items="stats" :cols="6" />
 
+      <!-- ②+ 班级概览：所教各班分开排成卡片，点一张切到该班名单 -->
+      <section v-if="classGroups.length > 1" class="card class-overview">
+        <div class="card-head">
+          <h3>所教班级（{{ classGroups.length }} 个）</h3>
+          <span class="hint">点一个班切换下方名单到该班；点「全部班级」恢复</span>
+        </div>
+        <div class="class-cards">
+          <button
+            class="class-card"
+            :class="{ on: !classFilter }"
+            @click="classFilter = ''"
+          >
+            <b>全部班级</b>
+            <span class="cc-total">{{ counts.all }} 人</span>
+            <span class="cc-break">
+              <i class="dot-red"></i>{{ counts.risk }}
+              <i class="dot-yel"></i>{{ counts.hw }}
+            </span>
+          </button>
+          <button
+            v-for="c in classGroups"
+            :key="c.name"
+            class="class-card"
+            :class="{ on: classFilter === c.name }"
+            @click="classFilter = c.name"
+          >
+            <b>{{ c.name }}</b>
+            <span class="cc-total">{{ c.total }} 人 · 均分 {{ c.avg }}</span>
+            <span class="cc-break">
+              <i class="dot-red"></i>{{ c.red }}
+              <i class="dot-yel"></i>{{ c.yellow }}
+              <i class="dot-grn"></i>{{ c.green }}
+            </span>
+          </button>
+        </div>
+      </section>
+
       <!-- ③ 四张课堂图：分布、节奏、作业、班级差 -->
       <div class="grid2">
         <div class="card">
@@ -314,11 +385,20 @@ const profile = computed(() => room.value?.teacher || null);
       <!-- ⑤ 课堂名单 -->
       <section class="card">
         <div class="card-head">
-          <h3>{{ course.name }} · 学生名单（{{ rows.length }} / {{ counts.all }} 人）</h3>
+          <h3>
+            {{ course.name }} · 学生名单
+            <span v-if="classFilter" class="cls-tag">{{ classFilter }}</span>
+            <span v-else class="cls-tag muted">全部班级</span>
+            （{{ rows.length }} / {{ counts.all }} 人）
+          </h3>
           <span class="hint">点击任意一行看这名学生在本课堂的考勤与作业</span>
         </div>
 
         <div class="filters">
+          <select v-model="classFilter" class="sel" aria-label="按班级筛选">
+            <option value="">全部班级</option>
+            <option v-for="c in classOptions" :key="c" :value="c">{{ c }}</option>
+          </select>
           <button class="fchip" :class="{ on: filter === 'all' }" @click="filter = 'all'">
             全部 {{ counts.all }}
           </button>
@@ -815,6 +895,84 @@ const profile = computed(() => room.value?.teacher || null);
   }
   .todo-wrap {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- 班级概览（任务 12：所教各班分开排版） ---------- */
+.class-overview {
+  background: linear-gradient(180deg, #fdf8ef 0%, #fff 100%);
+}
+.class-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.class-card {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.15s;
+}
+.class-card:hover {
+  border-color: var(--brand);
+  transform: translateY(-2px);
+}
+.class-card.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 2px 0 var(--brand) inset;
+}
+.class-card b {
+  font-size: 13px;
+  color: var(--text);
+}
+.cc-total {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.cc-break {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.cc-break i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot-red { background: #dc2626; }
+.dot-yel { background: #d97706; }
+.dot-grn { background: #047857; }
+
+/* 名单标题里的班级标签 */
+.cls-tag {
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+.cls-tag.muted {
+  background: #f3eee5;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+@media (max-width: 760px) {
+  .class-cards {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
 </style>

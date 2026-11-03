@@ -11,10 +11,11 @@ import os
 import queue
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,10 +27,38 @@ from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
 from engine.memory import ConversationMemory
-from engine.notifications import APPEALS, NOTIFS, TODOS
+from engine.notifications import APPEALS, MESSAGES, NOTIFS, TODOS
 from engine.risk import DEFAULT_CONFIG, RiskEngine
 
 BASE = Path(__file__).resolve().parent
+
+
+def _load_env_file() -> None:
+    """极简 .env 加载：不依赖 python-dotenv，避免线上托管环境缺包。
+
+    线上发布默认不读 .env（本文件只用 os.environ），而 .env 里的大模型
+    key 又不能进 git——这就导致线上 LLM_API_KEY 永远为空、llm.available()
+    返回 False、自动降级走规则引擎，看起来像“没接大模型”。这里手动读
+    .env 灌进 os.environ，已存在的环境变量不覆盖（线上若已注入同名变量
+    则以线上为准，不会互相打架）。
+    """
+    env_path = BASE / ".env"
+    if not env_path.exists():
+        return
+    for _line in env_path.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _k, _, _v = _line.partition("=")
+        _k, _v = _k.strip(), _v.strip()
+        # 去掉两端可选的引号
+        if len(_v) >= 2 and _v[0] == _v[-1] and _v[0] in ("'", '"'):
+            _v = _v[1:-1]
+        if _k and _k not in os.environ:
+            os.environ[_k] = _v
+
+
+_load_env_file()
 DIST = BASE / "web" / "site"
 LEGACY = BASE / "static"
 STARTED_AT = time.time()
@@ -286,6 +315,15 @@ class AppealResolveIn(BaseModel):
 
 class ReadIn(BaseModel):
     ids: list[str] = []
+
+
+class MessageSendIn(BaseModel):
+    sid: str           # 学生学号：家长发时=自己孩子，导员发时=指定学生
+    text: str
+
+
+class MessageReadIn(BaseModel):
+    thread_id: str
 
 
 def _scope(profile: dict, body: ChatIn) -> tuple[str, str | None]:
@@ -701,6 +739,160 @@ def teacher_classroom(request: Request):
     )
 
 
+# ---------------------------------------------------------------------------
+# 教师上传资源（历年真题 / 网课），可被学生端拉取
+# 演示场景把文件落到 data/teacher_resources/，metadata 写入同目录 index.json；
+# 线上若挂载为只读，写盘失败会退化成内存态（本次进程内仍可用，重启清空）。
+# ---------------------------------------------------------------------------
+RESOURCE_DIR = BASE / "data" / "teacher_resources"
+RESOURCE_INDEX = RESOURCE_DIR / "index.json"
+_resources_lock = threading.Lock()
+
+
+def _resources_load() -> list[dict]:
+    try:
+        if RESOURCE_INDEX.exists():
+            return json.loads(RESOURCE_INDEX.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
+def _resources_save(rows: list[dict]) -> None:
+    try:
+        RESOURCE_DIR.mkdir(parents=True, exist_ok=True)
+        RESOURCE_INDEX.write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        # 线上只读挂载：退化成内存态，列表接口仍能返回本次进程内的数据
+        pass
+
+
+def _resource_visible(row: dict, profile: dict) -> bool:
+    """教师只看自己的；学生看所有；其他端不可见。"""
+    role = profile.get("role")
+    if role == "teacher":
+        return row.get("teacher") == (profile.get("advisor") or profile.get("name"))
+    if role == "student":
+        return True
+    return False
+
+
+@app.get("/api/teacher/resources")
+def teacher_resources_list(request: Request, kind: str = Query("", description="exam|tutorial|空=全部")):
+    """教师看自己上传的；学生看所有老师上传的；其他端 403。"""
+    profile = request.state.profile
+    role = profile.get("role")
+    if role not in ("teacher", "student"):
+        raise HTTPException(403, "仅任课教师与学生可访问资源库")
+    rows = _resources_load()
+    rows = [r for r in rows if _resource_visible(r, profile)]
+    if kind:
+        rows = [r for r in rows if r.get("kind") == kind]
+    # 最新的在前
+    rows.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"items": rows}
+
+
+@app.post("/api/teacher/resources")
+async def teacher_resources_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    kind: str = Form(..., description="exam 真题 / tutorial 网课"),
+    course: str = Form(""),
+    class_name: str = Form(""),
+    note: str = Form(""),
+):
+    """教师上传一份真题或网课资源。学生端可拉取下载。"""
+    profile = request.state.profile
+    if profile.get("role") != "teacher":
+        raise HTTPException(403, "仅任课教师可上传资源")
+    if kind not in ("exam", "tutorial"):
+        raise HTTPException(400, "kind 只能是 exam 或 tutorial")
+    teacher_name = profile.get("advisor") or profile.get("name") or ""
+    # 限制 50 MB，避免大文件撑爆沙箱
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(413, "单个文件不超过 50 MB")
+    rid = f"r{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
+    filename = (file.filename or "").strip() or "untitled"
+    # 文件名加上 rid 前缀防冲突，保留原名用于展示
+    safe_name = filename.replace("/", "_").replace("\\", "_")
+    stored = RESOURCE_DIR / f"{rid}__{safe_name}"
+    try:
+        RESOURCE_DIR.mkdir(parents=True, exist_ok=True)
+        stored.write_bytes(content)
+    except OSError as e:
+        raise HTTPException(500, f"保存失败：{e}")
+    row = {
+        "id": rid,
+        "kind": kind,
+        "filename": filename,
+        "size": len(content),
+        "course": course.strip(),
+        "class_name": class_name.strip(),
+        "note": note.strip(),
+        "teacher": teacher_name,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    with _resources_lock:
+        rows = _resources_load()
+        rows.append(row)
+        _resources_save(rows)
+    return {"ok": True, "item": row}
+
+
+@app.delete("/api/teacher/resources/{rid}")
+def teacher_resources_delete(rid: str, request: Request):
+    """删除自己上传的一份资源（含文件本体）。"""
+    profile = request.state.profile
+    if profile.get("role") != "teacher":
+        raise HTTPException(403, "仅任课教师可删除资源")
+    teacher_name = profile.get("advisor") or profile.get("name") or ""
+    with _resources_lock:
+        rows = _resources_load()
+        hit = next((r for r in rows if r.get("id") == rid), None)
+        if not hit:
+            raise HTTPException(404, "资源不存在")
+        if hit.get("teacher") != teacher_name:
+            raise HTTPException(403, "只能删除自己上传的资源")
+        rows = [r for r in rows if r.get("id") != rid]
+        _resources_save(rows)
+    # 删文件本体（不存在就跳过）
+    target = RESOURCE_DIR / f"{rid}__{hit['filename'].replace('/', '_').replace(chr(92), '_')}"
+    try:
+        if target.exists():
+            target.unlink()
+    except OSError:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/teacher/resources/{rid}/download")
+def teacher_resources_download(rid: str, request: Request):
+    """下载资源：教师与学生均可。"""
+    profile = request.state.profile
+    if profile.get("role") not in ("teacher", "student"):
+        raise HTTPException(403, "仅任课教师与学生可下载资源")
+    rows = _resources_load()
+    hit = next((r for r in rows if r.get("id") == rid), None)
+    if not hit:
+        raise HTTPException(404, "资源不存在")
+    if not _resource_visible(hit, profile):
+        raise HTTPException(403, "无权访问该资源")
+    safe = hit["filename"].replace("/", "_").replace("\\", "_")
+    target = RESOURCE_DIR / f"{rid}__{safe}"
+    if not target.exists():
+        raise HTTPException(404, "文件已不存在")
+    return FileResponse(
+        target,
+        filename=safe,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/export/classroom")
 def export_classroom(request: Request):
     """课堂学情简报 → Word（教师端专属，其他端没有这个文书）。"""
@@ -832,6 +1024,81 @@ def appeal_resolve(aid: str, body: AppealResolveIn, request: Request):
                {"appeal_id": aid})
     TODOS.close_by_meta("counselor", COUNSELOR_ACCOUNT, {"appeal_id": aid})
     return {"ok": True, "appeal": row}
+
+
+# ---------------------------------------------------------------------------
+# 家长端 ↔ 辅导员端 双向消息：以学生 sid 为配对键
+# 家长发：to=counselor/COUNSELOR_ACCOUNT；导员发：to=parent/{sid}
+# ---------------------------------------------------------------------------
+@app.get("/api/messages")
+def messages_list(request: Request):
+    """家长：自己和导员的会话；导员：与各家长的会话列表。
+
+    导员端要展示「风险高的学生优先」的会话列表——哪怕还没发过消息的学生
+    也要列出来，方便导员主动联系。所以这里把 students 增强（带 level/score/
+    top_factor），让 threads_for 能按风险排序、补全没消息的会话。
+    """
+    p = request.state.profile
+    role = p.get("role")
+    if role not in ("parent", "counselor"):
+        raise HTTPException(403, "只有家长端和辅导员端可以使用家校消息")
+    students = None
+    if role == "counselor":
+        # 给每个学生带上风险等级/分数/主因，让前端列表能按风险展示
+        students = []
+        for s in DATASET["students"]:
+            sc = ENGINE.score(s["id"])
+            students.append({
+                "id": s["id"], "name": s["name"],
+                "class_name": s.get("class_name", ""),
+                "advisor": s.get("advisor", ""),
+                "level": sc["level"], "score": sc["score"],
+                "top_factor": sc["factors"][0]["label"] if sc["factors"] else "",
+            })
+    threads = MESSAGES.threads_for(role, p.get("account") or "", students=students)
+    return {"threads": threads, "unread": MESSAGES.unread_count(role, p.get("account") or "")}
+
+
+@app.post("/api/messages/send")
+def messages_send(body: MessageSendIn, request: Request):
+    p = request.state.profile
+    role = p.get("role")
+    sid = (body.sid or "").strip()
+    text = (body.text or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少学生学号")
+    if not text:
+        raise HTTPException(400, "消息内容不能为空")
+    if len(text) > 500:
+        raise HTTPException(400, "单条消息不超过 500 字")
+    from_name = p.get("name") or ""
+    if role == "parent":
+        # 家长只能就自己孩子发消息，sid 必须等于自己账号
+        if sid != p.get("account"):
+            raise HTTPException(403, "只能就自己的孩子与辅导员沟通")
+        msg = MESSAGES.send("parent", sid, from_name,
+                            "counselor", COUNSELOR_ACCOUNT, "辅导员", text, sid)
+    elif role == "counselor":
+        # 导员可以就任意学生发消息给其家长
+        if sid not in {s["id"] for s in DATASET["students"]}:
+            raise HTTPException(404, "学生不存在")
+        stu = ENGINE.get(sid)
+        to_name = f"{stu['name']} 家长"
+        msg = MESSAGES.send("counselor", COUNSELOR_ACCOUNT, from_name,
+                            "parent", sid, to_name, text, sid)
+    else:
+        raise HTTPException(403, "只有家长端和辅导员端可以发送家校消息")
+    return {"ok": True, "message": msg}
+
+
+@app.post("/api/messages/read")
+def messages_read(body: MessageReadIn, request: Request):
+    p = request.state.profile
+    role = p.get("role")
+    if role not in ("parent", "counselor"):
+        raise HTTPException(403, "只有家长端和辅导员端可以使用家校消息")
+    n = MESSAGES.mark_read(body.thread_id, role)
+    return {"ok": True, "marked": n}
 
 
 # ---------------------------------------------------------------------------

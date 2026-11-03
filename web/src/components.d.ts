@@ -18,6 +18,7 @@ declare module 'vue' {
     CitationList: typeof import('./components/CitationList.vue')['default']
     ClassBars: typeof import('./components/ClassBars.vue')['default']
     ClassCompare: typeof import('./components/ClassCompare.vue')['default']
+    CounselorForest: typeof import('./components/CounselorForest.vue')['default']
     CourseTrend: typeof import('./components/CourseTrend.vue')['default']
     DashNav: typeof import('./components/DashNav.vue')['default']
     DistDonut: typeof import('./components/DistDonut.vue')['default']

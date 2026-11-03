@@ -80,6 +80,12 @@ export const useChatStore = defineStore("chat", () => {
   const homeMode = ref<"chat" | "dash">("chat");
   const messages = ref<ChatMessage[]>([]);
   const suggestions = ref<string[]>([]);
+  /**
+   * 当前这批建议词属于哪个端。
+   * 建议词会被后端按上下文改写，也可能留着上一个端的状态；
+   * 记住出处，页面就能在角色对不上时立刻换回本端的默认提问，不会串端。
+   */
+  const suggRole = ref<Role | null>(null);
   const streaming = ref(false);
   const currentKey = ref<string | null>(null);
 
@@ -111,6 +117,12 @@ export const useChatStore = defineStore("chat", () => {
     };
   }
 
+  /** 建议词统一从这里落库，顺手记下它属于哪个端，避免端与端之间互相串 */
+  function setSuggest(role: Role, list?: string[]) {
+    suggestions.value = list?.length ? [...list] : [...DEFAULT_SUGGEST[role]];
+    suggRole.value = role;
+  }
+
   /**
    * 切到某端的会话：key = 角色:账号。
    * 同一角色换账号登录也会换会话（修复旧版"同端换人看到上一人对话"的问题）。
@@ -118,7 +130,11 @@ export const useChatStore = defineStore("chat", () => {
   function ensure(role: Role) {
     const account = auth.profile?.account || "anon";
     const key = `${role}:${account}`;
-    if (currentKey.value === key) return;
+    if (currentKey.value === key) {
+      // 会话没变但建议词是别的端留下的（登录跳转顺序会打断 store 的初始化），就地纠正
+      if (suggRole.value !== role) setSuggest(role);
+      return;
+    }
     abort();
     currentKey.value = key;
     const saved = loadSession(role, account);
@@ -126,11 +142,10 @@ export const useChatStore = defineStore("chat", () => {
       // 恢复历史：把恢复流里可能残留的 pending 标记清掉
       saved.forEach((m) => (m.pending = false));
       messages.value = saved;
-      suggestions.value = [...DEFAULT_SUGGEST[role]];
     } else {
       messages.value = [greeting(role)];
-      suggestions.value = [...DEFAULT_SUGGEST[role]];
     }
+    setSuggest(role);
     homeMode.value = "chat";
   }
 
@@ -141,7 +156,7 @@ export const useChatStore = defineStore("chat", () => {
     clearSession(role, account);
     currentKey.value = `${role}:${account}`;
     messages.value = [greeting(role)];
-    suggestions.value = [...DEFAULT_SUGGEST[role]];
+    setSuggest(role);
     homeMode.value = "chat";
     try {
       await api.resetAgent();          // 后端会话记忆一并清掉
@@ -191,7 +206,7 @@ export const useChatStore = defineStore("chat", () => {
             reply.citations = ev.citations || [];
             break;
           case "suggestions":
-            if (ev.suggestions?.length) suggestions.value = ev.suggestions;
+            if (ev.suggestions?.length) setSuggest(role, ev.suggestions);
             break;
           case "done":
             reply.elapsed = ev.elapsed_ms;
@@ -219,5 +234,5 @@ export const useChatStore = defineStore("chat", () => {
     void send(role, sid, question);
   }
 
-  return { homeMode, messages, suggestions, streaming, send, reset, ensure, abort, ask };
+  return { homeMode, messages, suggestions, suggRole, streaming, send, reset, ensure, abort, ask };
 });

@@ -16,9 +16,10 @@ const sub = computed(() => (route.meta?.sub as string) || "");
 const initial = computed(() => (auth.profile?.name || "?").slice(0, 1));
 const roleLabel = computed(
   () =>
-    ({ student: "学生", counselor: "辅导员", admin: "教务", parent: "家长" } as Record<string, string>)[
-      auth.profile?.role || ""
-    ] || "",
+    ({ student: "学生", counselor: "辅导员", admin: "教务", parent: "家长", teacher: "教师" } as Record<
+      string,
+      string
+    >)[auth.profile?.role || ""] || "",
 );
 
 async function logout() {

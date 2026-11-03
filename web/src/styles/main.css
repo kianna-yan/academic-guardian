@@ -328,6 +328,10 @@ a {
   overflow-x: hidden;
   padding: 6px 28px 32px;
   min-width: 0;
+  /* 始终保留滚动条槽位：从 chat 模式（overflow:hidden）切回普通页时，
+     浏览器不会立即分配滚动条，会出现“首次进入划不动、切到其他页再回来才行”。
+     scroll 模式提前占好槽位，状态切换瞬间即可用。 */
+  scroll-behavior: smooth;
 }
 /* 整页对话模式：view 变成不滚动的 flex 容器，让聊天自己管理滚动 */
 .view.view-chat {

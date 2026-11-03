@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
 import ChatHome from "@/components/ChatHome.vue";
+import CounselorForest from "@/components/CounselorForest.vue";
 import DashNav from "@/components/DashNav.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
 import RegionBand from "@/components/RegionBand.vue";
@@ -76,6 +77,12 @@ function gtTitle(row: RosterRow) {
 
 function openStudent(row: RosterRow) {
   drawer.sid = row.id;
+  drawer.open = true;
+}
+
+/** 智慧森林点树：拿 sid 打开学生详情抽屉，看风险因素与存在的问题 */
+function openStudentBySid(sid: string) {
+  drawer.sid = sid;
   drawer.open = true;
 }
 
@@ -260,6 +267,15 @@ async function openLetter(type: "student" | "counselor") {
   </div>
 
   <StudentDrawer v-model="drawer.open" :sid="drawer.sid" @letter="openLetter" />
+
+  <!-- 智慧森林：每个学生一棵树，每班一片森林。放在名单之后，
+       看完「谁最该找」再看「这个班整体长成什么样」。 -->
+  <RegionBand id="forest" no="02" title="智慧森林" tone="learn"
+    desc="每个学生一棵树，按风险分形态；点任意一棵树查看该生详情与存在的问题" />
+  <div class="card">
+    <CounselorForest :rows="rows" @select="openStudentBySid" />
+  </div>
+
   <LetterDialog
     v-model="dialog.open"
     :title="dialog.title"

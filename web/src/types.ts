@@ -476,6 +476,40 @@ export interface NoticePayload {
 }
 
 /* ------------------------------------------------------------------
+ * 家长端 ↔ 辅导员端 双向消息
+ * ---------------------------------------------------------------- */
+export interface MessageItem {
+  id: string;
+  thread_id: string;
+  sid: string;
+  from_role: "parent" | "counselor";
+  from_name: string;
+  to_role: "parent" | "counselor";
+  to_name: string;
+  text: string;
+  ts: string;
+  read: boolean;
+}
+
+export interface MessageThread {
+  thread_id: string;
+  sid: string;
+  peer_name: string;       // 对方显示名
+  peer_role: "parent" | "counselor";
+  peer_phone?: string;     // 对方联系方式：家长端=辅导员电话，导员端=对应家长电话
+  last_text: string;
+  last_ts: string;
+  unread: number;
+  messages: MessageItem[];
+  // 导员端列表用：学生风险信息（按风险排序展示，没消息的学生也能看到）
+  student_name?: string;
+  student_class?: string;
+  level?: "red" | "yellow" | "green";
+  score?: number;
+  top_factor?: string;
+}
+
+/* ------------------------------------------------------------------
  * 教师端：任课老师视角的课堂学情
  * ---------------------------------------------------------------- */
 export interface TeacherCourseBrief {
@@ -514,6 +548,21 @@ export interface TeacherView {
   teacher: string;
   courses: TeacherCourseBrief[];
   students: TeacherStudentRow[];
+}
+
+/* ------------------------------------------------------------------
+ * 教师上传资源（历年真题 / 网课）
+ * ---------------------------------------------------------------- */
+export interface TeacherResource {
+  id: string;
+  kind: "exam" | "tutorial";
+  filename: string;
+  size: number;
+  course?: string;
+  class_name?: string;
+  note?: string;
+  teacher: string;
+  created_at: string;
 }
 
 /* ------------------------------------------------------------------

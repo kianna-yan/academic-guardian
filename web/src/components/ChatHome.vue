@@ -4,7 +4,7 @@ import AgentBriefing from "@/components/AgentBriefing.vue";
 import CitationList from "@/components/CitationList.vue";
 import MarkdownBody from "@/components/MarkdownBody.vue";
 import TraceSteps from "@/components/TraceSteps.vue";
-import { useChatStore } from "@/stores/chat";
+import { useChatStore, DEFAULT_SUGGEST } from "@/stores/chat";
 import type { Role } from "@/types";
 
 const props = defineProps<{ role: Role; sid: string | null }>();
@@ -52,6 +52,26 @@ const PLACEHOLDER: Record<Role, string> = {
 
 const home = computed(() => HOME[props.role] ?? HOME.student);
 const placeholder = computed(() => PLACEHOLDER[props.role] ?? PLACEHOLDER.student);
+
+/**
+ * 建议词必须跟本页的端口一致。
+ * store 里的建议词可能还是上一个端（或登录前的默认学生态）留下的，
+ * 这里以页面自己声明的 role 为准：对不上就直接用本端默认提问兜住。
+ */
+const suggestList = computed(() =>
+  chat.suggRole === props.role ? chat.suggestions : DEFAULT_SUGGEST[props.role],
+);
+
+/**
+ * 这个组件就是某个端的对话主界面，进来先把会话锚定到自己身上：
+ * 问候语、建议词、（若换了账号）历史记录都会跟着 role 走。
+ * 不依赖 App 里那个 watch —— 登录跳转与路由切换的先后顺序会让它漏触发。
+ */
+watch(
+  () => props.role,
+  (r) => chat.ensure(r as Role),
+  { immediate: true },
+);
 
 function goDash() {
   chat.homeMode = "dash";
@@ -154,8 +174,8 @@ function intentLabel(v: string): string {
 
     <div class="chat-home-foot">
       <div class="chat-col">
-        <div v-if="chat.suggestions.length" class="ch-suggest">
-          <button v-for="s in chat.suggestions" :key="s" class="chip" @click="send(s)">{{ s }}</button>
+        <div v-if="suggestList.length" class="ch-suggest">
+          <button v-for="s in suggestList" :key="s" class="chip" @click="send(s)">{{ s }}</button>
         </div>
         <form class="ch-draft" @submit.prevent="submit">
           <input

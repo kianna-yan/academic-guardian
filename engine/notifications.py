@@ -184,6 +184,182 @@ class AppealCenter:
 NOTIFS = NotificationCenter()
 TODOS = TodoCenter()
 APPEALS = AppealCenter()
+MESSAGES = None  # 在文件末尾实例化，避免前向引用
+
+
+class MessageCenter:
+    """家长端 ↔ 辅导员端 双向消息。
+
+    设计：
+    - 以学生 sid 为配对键（thread_id = "pc:{sid}"），家长账号 = 孩子学号，
+      导员账号 = 工号；一个学生的家长和导员之间只有一条会话线。
+    - 每条消息记录 from/to/正文/时间/已读；发送时同时给对方推一条通知（复用 NOTIFS），
+      保证对方即使不打开消息面板也能从铃铛红点 + 永久弹窗看到。
+    - 纯内存实现（演示场景）。
+    """
+
+    def __init__(self) -> None:
+        self._threads: dict[str, list[dict]] = {}   # thread_id → 消息列表（时间正序）
+        self._lock = threading.Lock()
+        self._seq = 0
+
+    @staticmethod
+    def thread_id(sid: str) -> str:
+        return f"pc:{sid}"
+
+    def _new(self, from_role: str, from_name: str, to_role: str, to_name: str,
+             text: str, sid: str) -> dict:
+        self._seq += 1
+        return {
+            "id": f"m{self._seq:04d}",
+            "thread_id": self.thread_id(sid),
+            "sid": sid,
+            "from_role": from_role,
+            "from_name": from_name,
+            "to_role": to_role,
+            "to_name": to_name,
+            "text": text,
+            "ts": _now(),
+            "read": False,
+        }
+
+    def send(self, from_role: str, from_account: str, from_name: str,
+             to_role: str, to_account: str, to_name: str, text: str,
+             sid: str) -> dict:
+        """发一条消息；同时给对方推一条通知（铃铛红点 + 永久弹窗）。
+
+        只推这一条通知，前端不再合成第二条：旧版前端 notices.ts 会再合成一条
+        “发来家校消息”的弹窗，导致用户看到两个标题不同的弹窗。
+        现在统一由后端推、kind 固定 family_message，标题就叫“发来家校消息”。
+        """
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("消息内容不能为空")
+        msg = self._new(from_role, from_name, to_role, to_name, text, sid)
+        with self._lock:
+            self._threads.setdefault(msg["thread_id"], []).append(msg)
+        # 给对方推通知（唯一一份）
+        NOTIFS.push(to_role, to_account, "family_message",
+                    f"{from_name} 发来家校消息",
+                    text[:80] + ("…" if len(text) > 80 else ""),
+                    {"thread_id": msg["thread_id"], "sid": sid, "msg_id": msg["id"]})
+        return msg
+
+    def threads_for(self, role: str, account: str, students: list[dict] | None = None) -> list[dict]:
+        """返回该用户参与的会话列表（家长：1 条；导员：名下每个学生一条）。
+
+        students 用来补全导员侧的学生姓名/班级（家长侧 sid 就是自己孩子，不必补）。
+        每条会话带 peer_phone（对方联系方式）：家长端看到的是辅导员电话，
+        导员端看到的是对应学生家长的电话——方便两端互相找。
+
+        导员端的列表要展示「风险高的学生优先」——哪怕还没发过消息的学生，
+        也应该列出来让导员能主动联系。所以遍历 students 全集，按 level 排序：
+        红 → 黄 → 绿，同级按分数降序。没消息的会话 messages=[]。
+        """
+        out: list[dict] = []
+        stu_map = {str(s["id"]): s for s in (students or [])}
+        # 演示场景固定一位辅导员，电话也固定为占位号（数据集里没有真实辅导员电话）
+        counselor_phone = "138-0013-8000"
+        if role == "parent":
+            # 家长只看自己孩子那条线
+            sid = account
+            tid = self.thread_id(sid)
+            msgs = self._threads.get(tid, [])
+            if msgs:
+                unread = sum(1 for m in msgs if m["to_role"] == "parent" and not m["read"])
+                out.append({"thread_id": tid, "sid": sid,
+                            "peer_name": "辅导员", "peer_role": "counselor",
+                            "peer_phone": counselor_phone,
+                            "last_text": msgs[-1]["text"], "last_ts": msgs[-1]["ts"],
+                            "unread": unread, "messages": list(msgs)})
+            else:
+                out.append({"thread_id": tid, "sid": sid,
+                            "peer_name": "辅导员", "peer_role": "counselor",
+                            "peer_phone": counselor_phone,
+                            "last_text": "", "last_ts": "",
+                            "unread": 0, "messages": []})
+        elif role == "counselor":
+            # 导员看所有名下学生（不只发过消息的）：遍历 students 全集，
+            # 没消息的学生也列出来，messages=[]，方便主动联系。
+            # 没拿到 students 兜底用已发消息的会话。
+            if stu_map:
+                order = {"red": 0, "yellow": 1, "green": 2}
+                items = sorted(
+                    stu_map.values(),
+                    key=lambda s: (order.get(s.get("level"), 9), -(s.get("score") or 0)),
+                )
+                for stu in items:
+                    sid = str(stu["id"])
+                    tid = self.thread_id(sid)
+                    msgs = self._threads.get(tid, [])
+                    peer_name = f"{stu['name']} 家长"
+                    tail = stu.get("phone_tail")
+                    if not tail and sid:
+                        try:
+                            tail = f"{int(sid[-4:]) % 10000:04d}"
+                        except Exception:
+                            tail = "0000"
+                    peer_phone = f"138-0013-{tail}"
+                    unread = sum(1 for m in msgs if m["to_role"] == "counselor" and not m["read"])
+                    out.append({
+                        "thread_id": tid, "sid": sid,
+                        "peer_name": peer_name, "peer_role": "parent",
+                        "peer_phone": peer_phone,
+                        "last_text": msgs[-1]["text"] if msgs else "",
+                        "last_ts": msgs[-1]["ts"] if msgs else "",
+                        "unread": unread, "messages": list(msgs),
+                        # 学生侧信息：供前端列表展示风险标签/分数/班级
+                        "student_name": stu["name"],
+                        "student_class": stu.get("class_name", ""),
+                        "level": stu.get("level", "green"),
+                        "score": stu.get("score", 0),
+                        "top_factor": stu.get("top_factor", ""),
+                    })
+            else:
+                # 兜底：没传 students 就按旧逻辑只看有消息的
+                for tid, msgs in self._threads.items():
+                    sid = tid.split(":", 1)[1]
+                    peer_name = f"家长（{sid}）"
+                    tail = "0000"
+                    try:
+                        tail = f"{int(sid[-4:]) % 10000:04d}"
+                    except Exception:
+                        pass
+                    peer_phone = f"138-0013-{tail}"
+                    unread = sum(1 for m in msgs if m["to_role"] == "counselor" and not m["read"])
+                    out.append({"thread_id": tid, "sid": sid,
+                                "peer_name": peer_name, "peer_role": "parent",
+                                "peer_phone": peer_phone,
+                                "last_text": msgs[-1]["text"] if msgs else "",
+                                "last_ts": msgs[-1]["ts"] if msgs else "",
+                                "unread": unread, "messages": list(msgs)})
+                out.sort(key=lambda x: x["last_ts"] or "", reverse=True)
+        return out
+
+    def mark_read(self, thread_id: str, role: str) -> int:
+        """把该会话里对方发给我的消息全部标已读。"""
+        n = 0
+        with self._lock:
+            for m in self._threads.get(thread_id, []):
+                if m["to_role"] == role and not m["read"]:
+                    m["read"] = True
+                    n += 1
+        return n
+
+    def unread_count(self, role: str, account: str) -> int:
+        """该用户收到的未读消息数（用于铃铛徽标合并）。"""
+        total = 0
+        for tid in self._threads:
+            for m in self._threads[tid]:
+                if m["to_role"] == role and not m["read"]:
+                    # 家长只看自己那条线（account=sid）；导员看全部
+                    if role == "parent" and tid.split(":", 1)[1] != account:
+                        continue
+                    total += 1
+        return total
+
+
+MESSAGES = MessageCenter()
 
 
 # ---------------------------------------------------------------------------
