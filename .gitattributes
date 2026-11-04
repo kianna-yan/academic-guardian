@@ -1,1 +1,7 @@
 * text=auto eol=lf
+
+# 前端构建产物（vite 打包出来的 chunk）
+# 每次 build 文件名都会带新哈希，不加这条的话每次提交页都会铺开几十个
+# 「重命名 +1/-1」的碎条目，还要一条条点「载入差异」。
+# linguist-generated 让 GitHub 当成生成文件折叠，-diff 让 Git 不去算逐行差异。
+web/site/** linguist-generated=true -diff
