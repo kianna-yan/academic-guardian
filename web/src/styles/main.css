@@ -88,6 +88,8 @@ a {
   gap: 22px;
   overflow-y: auto;
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 .brand {
   display: flex;
@@ -246,6 +248,10 @@ a {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  /* 主区永远压在侧栏之上：图表 tooltip、悬浮卡片这类溢出内容宁可盖住棕色面板，
+     也不能被面板切掉半截（以前 tooltip 飘到左侧就被侧栏挡住了前半句）。 */
+  position: relative;
+  z-index: 2;
 }
 .topbar {
   display: flex;

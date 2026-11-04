@@ -6,7 +6,13 @@ import { api } from "@/api/client";
 import CheckinDialog from "@/components/CheckinDialog.vue";
 import RegionBand from "@/components/RegionBand.vue";
 import { useAuthStore } from "@/stores/auth";
-import type { CheckinList, CheckinRecord, LessonSlot, TimetablePayload } from "@/types";
+import type {
+  CheckinList,
+  CheckinRecord,
+  LessonSlot,
+  TimetablePayload,
+  Understand,
+} from "@/types";
 
 /**
  * 我的课表。
@@ -70,18 +76,31 @@ const activePoints = computed(() => {
   return meta.value?.points?.[code] || [];
 });
 
+/**
+ * 记录保存后立刻回写本地课表。
+ *
+ * 关键点：后端返回的 slots 与 cells 是两份独立序列化的数据（cells 按
+ * weekday@period 分桶存的是同一批课的另一份拷贝）。只刷新 slots 的话，
+ * 课表网格（读 cells）上的状态不会变——用户会以为没保存成功，必须切到
+ * 「学习轨迹」才看得到更新。这里两处一起打补丁，外加把 stats 重算。
+ */
 function onSaved(row: CheckinRecord) {
   if (data.value) {
-    for (const s of data.value.slots) {
+    // 后端保存接口回的是 understand，课表读的是 state；老版本后端没补 state 时兜一下
+    const fallback = (row as CheckinRecord & { understand?: Understand }).understand || "";
+    const nextState = row.state || fallback;
+    const patch = (s: LessonSlot) => {
       if (s.course === row.course && s.date === row.date && s.period === row.period) {
         s.recorded = true;
-        s.state = row.state;
-        s.state_label = row.state_label;
+        s.state = nextState;
+        s.state_label = row.state_label || STATE_LABEL[nextState] || "";
         s.break_label = row.break_label;
         s.point = row.point;
         s.checkin_id = row.id;
       }
-    }
+    };
+    data.value.slots.forEach(patch);
+    Object.values(data.value.cells || {}).forEach((list) => list.forEach(patch));
     data.value.stats.checked = data.value.slots.filter((s) => s.held && s.recorded).length;
     data.value.stats.pending = data.value.slots.filter((s) => s.held && !s.recorded).length;
   }
@@ -156,8 +175,10 @@ function dayNumber(iso: string) {
             <div class="gh corner">节次</div>
             <div v-for="d in data.days" :key="d.key" class="gh day" :class="{ today: d.today }">
               <b>{{ d.label }}</b>
-              <em>{{ dayNumber(d.date) }}</em>
-              <span v-if="d.today" class="today-tag">今天</span>
+              <div class="day-sub">
+                <em>{{ dayNumber(d.date) }}</em>
+                <span v-if="d.today" class="today-tag">今天</span>
+              </div>
             </div>
 
             <template v-for="p in data.periods" :key="p">
@@ -346,35 +367,47 @@ function dayNumber(iso: string) {
 }
 .gh.day {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 2px;
   border-radius: 8px;
   background: #faf6ee;
   position: relative;
+  padding: 6px 6px 7px;
 }
 .gh.day b {
   font-size: 12.5px;
   color: var(--text);
+  line-height: 1.2;
+}
+/* 日期与「今天」并排：原来「今天」用绝对定位压右上角，
+   窄列时会盖住 10/21 这种日期，还会被容器裁掉半截。 */
+.day-sub {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  line-height: 1;
 }
 .gh.day em {
   font-style: normal;
   font-size: 11px;
   color: var(--muted);
+  white-space: nowrap;
 }
 .gh.day.today {
   background: #fdf1de;
 }
 .today-tag {
-  position: absolute;
-  top: -7px;
-  right: 6px;
   font-size: 9.5px;
   padding: 0 5px;
   border-radius: 99px;
   background: var(--brand);
   color: #fff;
-  line-height: 15px;
+  line-height: 14px;
+  white-space: nowrap;
+  flex: none;
 }
 .period {
   display: grid;

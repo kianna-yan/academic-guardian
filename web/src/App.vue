@@ -90,6 +90,18 @@ watch(
   { immediate: true },
 );
 
+/**
+ * 每次进入新的页面/端口都主动拉一次消息与待办。
+ * 轮询是 25 秒一轮，切页时刚好错开就会看到旧数据（例如别处刚发来的家校消息
+ * 在侧栏没有红点）。这里按「路径 + 锚点 + 对话/看板模式」变化补一次静默刷新。
+ */
+watch(
+  () => `${route.path}|${route.hash}|${chat.homeMode}`,
+  () => {
+    if (!isLogin.value && auth.profile) void notices.refresh(true);
+  },
+);
+
 // ---- 大模型健康状态：掉线时顶部挂黄条，别让用户以为只是「今天变笨了」 ----
 // 后端失败会静默回落规则引擎（页面不报错，只是措辞变生硬），所以这里要主动问。
 const llmOff = ref<LlmStatus | null>(null);

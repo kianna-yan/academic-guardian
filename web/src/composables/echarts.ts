@@ -31,7 +31,11 @@ export function useChart(target: Ref<HTMLElement | null>, option: Ref<any>) {
   function render() {
     if (!target.value) return;
     if (!inst) inst = echarts.init(target.value, undefined, { renderer: "canvas" });
-    inst.setOption(option.value, true);
+    // confine：tooltip 只在图表容器内定位。默认它会跟着鼠标往左飘，
+    // 飘出卡片就压到侧栏边上、被切掉半句（“红色预警：”只剩“8 人（3.33%）”）。
+    const opt = option.value;
+    const merged = opt?.tooltip ? { ...opt, tooltip: { confine: true, ...opt.tooltip } } : opt;
+    inst.setOption(merged, true);
   }
 
   onMounted(() => {

@@ -86,33 +86,68 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
           :title="`${t.name} · ${LEVEL_LABEL[t.level]} · 风险分 ${t.score} · ${t.top_factor}（点击查看详情）`"
           @click="pick(String(t.id))"
         >
-          <!-- 树形 SVG：60x80 viewBox，按 level 切换形态 -->
-          <svg viewBox="0 0 60 80" class="tree-svg" aria-hidden="true">
-            <!-- 树干 -->
-            <rect x="27" y="48" width="6" height="22" rx="2" :fill="t.level === 'red' ? '#7c5a3a' : '#6b4423'" />
-            <!-- 树冠：green 茂盛圆冠 / yellow 黄色椭圆 + 落叶 / red 枯枝 + 红果 -->
+          <!-- 树形 SVG：64x84 viewBox，按 level 切换形态。
+               统一结构 = 地面阴影 + 锥度树干（带侧面高光）+ 树冠/枯枝。 -->
+          <svg viewBox="0 0 64 84" class="tree-svg" aria-hidden="true">
+            <!-- 地面阴影：让树像"长在地上"而不是飘着 -->
+            <ellipse cx="32" cy="79" rx="15" ry="3.2" fill="#4a3a22" opacity="0.1" />
+
+            <!-- 树干：底部宽、往上收，右侧一道高光做出圆柱感 -->
+            <path
+              d="M29.2 78 C29.6 68 30.2 58 30.4 50 L33.6 50 C33.8 58 34.4 68 34.8 78 Z"
+              :fill="t.level === 'red' ? '#7c5a3a' : '#8a5a2b'"
+            />
+            <path
+              d="M30.7 78 C31 68 31.4 58 31.6 50 L32.4 50 C32.4 58 32.2 68 32 78 Z"
+              :fill="t.level === 'red' ? '#96714c' : '#a97038'"
+              opacity="0.75"
+            />
+
+            <!-- green：茂盛圆冠，三层叠加 + 高光 + 小果实 -->
             <template v-if="t.level === 'green'">
-              <circle cx="30" cy="34" r="18" fill="#16a34a" />
-              <circle cx="22" cy="28" r="9" fill="#22c55e" />
-              <circle cx="38" cy="26" r="8" fill="#22c55e" />
-              <circle cx="30" cy="22" r="7" fill="#4ade80" />
+              <circle cx="32" cy="33" r="19" fill="#15803d" />
+              <circle cx="22" cy="30" r="11.5" fill="#16a34a" />
+              <circle cx="42" cy="29" r="10.5" fill="#16a34a" />
+              <circle cx="32" cy="21" r="12" fill="#22c55e" />
+              <circle cx="25" cy="25" r="7" fill="#4ade80" opacity="0.9" />
+              <circle cx="39" cy="35" r="6" fill="#4ade80" opacity="0.45" />
+              <circle cx="23" cy="37" r="2.6" fill="#f59e0b" />
+              <circle cx="22.2" cy="36.2" r="1" fill="#fde68a" opacity="0.85" />
+              <circle cx="40" cy="25" r="2.4" fill="#f97316" />
+              <circle cx="39.3" cy="24.3" r="0.9" fill="#fed7aa" opacity="0.85" />
+              <circle cx="35" cy="42" r="2.2" fill="#fbbf24" />
             </template>
+
+            <!-- yellow：黄叶树，冠形略散 + 飘落叶片 -->
             <template v-else-if="t.level === 'yellow'">
-              <ellipse cx="30" cy="34" rx="17" ry="15" fill="#d97706" />
-              <ellipse cx="22" cy="29" rx="8" ry="7" fill="#f59e0b" />
-              <ellipse cx="38" cy="28" rx="7" ry="6" fill="#fbbf24" />
-              <!-- 几片落叶飘下来 -->
-              <ellipse cx="14" cy="56" rx="3" ry="2" fill="#fbbf24" opacity="0.7" transform="rotate(-20 14 56)" />
-              <ellipse cx="48" cy="60" rx="3" ry="2" fill="#f59e0b" opacity="0.6" transform="rotate(25 48 60)" />
+              <circle cx="32" cy="34" r="18.5" fill="#c2740a" />
+              <circle cx="23" cy="30" r="11" fill="#d97706" />
+              <circle cx="41" cy="29" r="10" fill="#e8890c" />
+              <circle cx="32" cy="22" r="11.5" fill="#f59e0b" />
+              <circle cx="26" cy="26" r="6.5" fill="#fbbf24" opacity="0.9" />
+              <circle cx="39" cy="37" r="5" fill="#fcd34d" opacity="0.5" />
+              <path d="M18 57 q3.5 -3 7 0 q-3.5 3.5 -7 0" fill="#f59e0b" opacity="0.85" />
+              <path d="M47 63 q3 -2.5 6 0 q-3 3 -6 0" fill="#fbbf24" opacity="0.7" />
+              <path d="M27 68 q2.5 -2 5 0 q-2.5 2.5 -5 0" fill="#f59e0b" opacity="0.5" />
             </template>
+
+            <!-- red：枯枝分叉 + 红果，枝头略暗表示失水 -->
             <template v-else>
-              <!-- 枯枝：稀疏枝条 -->
-              <path d="M30 50 L18 32 M30 50 L42 30 M30 50 L30 24 M22 38 L14 28 M38 38 L46 28" 
-                    stroke="#5a3d20" stroke-width="2" fill="none" stroke-linecap="round" />
-              <!-- 红色警示果 -->
-              <circle cx="18" cy="32" r="3" fill="#dc2626" />
-              <circle cx="42" cy="30" r="3" fill="#dc2626" />
-              <circle cx="30" cy="24" r="3.5" fill="#ef4444" />
+              <path d="M32 50 L32 30" stroke="#6b4a2a" stroke-width="3.2" stroke-linecap="round" />
+              <path d="M32 41 L20 28" stroke="#6b4a2a" stroke-width="2.6" stroke-linecap="round" />
+              <path d="M32 39 L44 26" stroke="#6b4a2a" stroke-width="2.6" stroke-linecap="round" />
+              <path d="M32 31 L26 18" stroke="#7a5632" stroke-width="2.2" stroke-linecap="round" />
+              <path d="M32 31 L39 17" stroke="#7a5632" stroke-width="2.2" stroke-linecap="round" />
+              <path d="M20 28 L14 21" stroke="#7a5632" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M44 26 L50 20" stroke="#7a5632" stroke-width="1.7" stroke-linecap="round" />
+              <circle cx="20" cy="28" r="3.4" fill="#dc2626" />
+              <circle cx="19.2" cy="27" r="1.3" fill="#fca5a5" opacity="0.85" />
+              <circle cx="44" cy="26" r="3.2" fill="#dc2626" />
+              <circle cx="43.3" cy="25" r="1.2" fill="#fca5a5" opacity="0.85" />
+              <circle cx="32" cy="31" r="3.6" fill="#ef4444" />
+              <circle cx="31.2" cy="30" r="1.4" fill="#fecaca" opacity="0.9" />
+              <circle cx="26" cy="18" r="2.4" fill="#ef4444" opacity="0.9" />
+              <path d="M23 63 q3 -2.5 6 0 q-3 3 -6 0" fill="#b45309" opacity="0.5" />
             </template>
           </svg>
           <div class="tree-meta">
@@ -228,9 +263,13 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
   outline-offset: 2px;
 }
 .tree-svg {
-  width: 60px;
-  height: 80px;
+  width: 64px;
+  height: 84px;
   display: block;
+  transition: transform 0.18s ease;
+}
+.tree:hover .tree-svg {
+  transform: scale(1.06);
 }
 .tree-meta {
   display: flex;
@@ -269,8 +308,8 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
     grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
   }
   .tree-svg {
-    width: 50px;
-    height: 66px;
+    width: 54px;
+    height: 71px;
   }
 }
 </style>

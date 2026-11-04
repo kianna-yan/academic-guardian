@@ -8,7 +8,6 @@ import DashNav from "@/components/DashNav.vue";
 import DistDonut from "@/components/DistDonut.vue";
 import FactorBars from "@/components/FactorBars.vue";
 import RegionBand from "@/components/RegionBand.vue";
-import StatGrid from "@/components/StatGrid.vue";
 import { useAppStore } from "@/stores/app";
 import { useChatStore } from "@/stores/chat";
 import type {
@@ -157,17 +156,6 @@ async function runCourseImport() {
   }
 }
 
-const stats = computed(() => {
-  const o = overview.value;
-  if (!o) return [];
-  return [
-    { value: o.total, label: "在册学生", tone: "" as const },
-    { value: o.dist.red, label: `红色预警 · ${o.dist_pct.red}%`, tone: "red" as const },
-    { value: o.dist.yellow, label: `黄色关注 · ${o.dist_pct.yellow}%`, tone: "amber" as const },
-    { value: o.rising_count, label: "风险上升人数", tone: "" as const },
-  ];
-});
-
 const pressure = computed(() =>
   (overview.value?.top_factors ?? []).map((f) => ({ label: f.label, points: f.points })),
 );
@@ -189,21 +177,11 @@ async function load() {
   }
 }
 
-/* ---------------- 每日预警日报（定时任务同款聚合） ---------------- */
-const daily = ref<Awaited<ReturnType<typeof api.dailyReport>> | null>(null);
-async function loadDaily() {
-  try {
-    daily.value = await api.dailyReport();
-  } catch {
-    daily.value = null; // 日报卡失败不挡页面，对话里问「今日日报」同样能拿到
-  }
-}
-
+/* 01 全校看板那一块删掉后，图表直接落在页面顶部；#board 锚点仍留给侧栏「全校概览」 */
 onMounted(() => {
   load();
   loadAccounts();
   loadCurriculum();
-  loadDaily();
 });
 
 async function save() {
@@ -272,61 +250,44 @@ async function exportCSV() {
       <button class="btn primary" @click="downloadDoc('/api/export/semester')">学期汇报 PPT</button>
     </div>
 
-    <RegionBand id="board" no="01" title="全校看板" tone="archive"
-      desc="日报、风险分布、班级对比——一屏看完这所学校现在什么状态" />
+    <!-- 全校看板整块（标题 + 每日日报卡 + 四张统计卡）已按反馈删掉：
+         日报在右上角工具栏有独立按钮，四个总数在下方环形图里也能读到，留着只是重复占屏。
+         侧栏「全校概览」仍落到这个锚点上，直接看分布、因素与班级对比。 -->
+    <div id="board" class="board-top">
+      <div class="two-col">
+        <div class="card">
+          <div class="card-head">
+            <h3>风险等级分布</h3>
+            <span class="hint">数据截至第 {{ app.week }} 教学周</span>
+          </div>
+          <div v-if="overview">
+            <DistDonut :dist="overview.dist" />
+          </div>
+          <div v-else class="skeleton" style="height: 160px"></div>
+        </div>
 
-    <!-- 每日预警日报：定时任务与对话共用同一份聚合，这里展示它说了什么 -->
-    <div v-if="daily" class="card">
-      <div class="card-head">
-        <h3>每日预警日报</h3>
-        <div class="head-side">
-          <span class="tiny muted">每天 08:00 自动生成 · 本次 {{ daily.generated_at }}</span>
-          <button class="btn" @click="downloadDoc('/api/export/daily-report')">Word</button>
+        <div class="card">
+          <div class="card-head">
+            <h3>最普遍的风险因素</h3>
+            <span class="hint">全校人均摊到的分数</span>
+          </div>
+          <FactorBars v-if="pressure.length" :items="pressure" mode="pressure" />
         </div>
       </div>
-      <p style="margin: 2px 0 10px; font-size: 13.5px">{{ daily.summary }}</p>
-      <div class="report-strip">
-        <span v-for="x in daily.red_top" :key="x.name" class="rs-item">
-          <b>{{ x.name }}</b> {{ x.class_name }} · {{ x.score }} 分
-        </span>
+
+      <div class="card mt">
+        <div class="card-head">
+          <h3>班级风险对比</h3>
+          <span class="hint">柱长为班级人数，红色段为预警人数</span>
+        </div>
+        <div v-if="overview">
+          <ClassCompare :by-class="overview.by_class" />
+        </div>
+        <div v-else class="skeleton" style="height: 180px"></div>
       </div>
     </div>
 
-  <StatGrid :items="stats" />
-
-  <div class="two-col">
-    <div class="card">
-      <div class="card-head">
-        <h3>风险等级分布</h3>
-        <span class="hint">数据截至第 {{ app.week }} 教学周</span>
-      </div>
-      <div v-if="overview">
-        <DistDonut :dist="overview.dist" />
-      </div>
-      <div v-else class="skeleton" style="height: 160px"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <h3>最普遍的风险因素</h3>
-        <span class="hint">全校人均摊到的分数</span>
-      </div>
-      <FactorBars v-if="pressure.length" :items="pressure" mode="pressure" />
-    </div>
-  </div>
-
-  <div class="card mt">
-    <div class="card-head">
-      <h3>班级风险对比</h3>
-      <span class="hint">柱长为班级人数，红色段为预警人数</span>
-    </div>
-    <div v-if="overview">
-      <ClassCompare :by-class="overview.by_class" />
-    </div>
-    <div v-else class="skeleton" style="height: 180px"></div>
-  </div>
-
-  <RegionBand id="rules" no="02" title="预警规则" tone="risk"
+  <RegionBand id="rules" no="01" title="预警规则" tone="risk"
     desc="红黄线一拖，全校当场重算；规则变了，名单和文书跟着变" />
 
   <div class="card">
@@ -361,7 +322,7 @@ async function exportCSV() {
     </div>
   </div>
 
-  <RegionBand id="accounts" no="03" title="账号与权限" tone="learn"
+  <RegionBand id="accounts" no="02" title="账号与权限" tone="learn"
     desc="批量开学生账号，学号不在学情库里的会逐行报错" />
 
   <div class="card">
@@ -432,7 +393,7 @@ async function exportCSV() {
     </div>
   </div>
 
-  <RegionBand id="curriculum" no="04" title="课程与教师档案" tone="ai"
+  <RegionBand id="curriculum" no="03" title="课程与教师档案" tone="ai"
     desc="学生端「我的任课老师」直接读这里，改完即时生效" />
 
   <div class="card">
@@ -521,6 +482,9 @@ async function exportCSV() {
 </template>
 
 <style scoped>
+.board-top {
+  scroll-margin-top: 12px;
+}
 .import-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);

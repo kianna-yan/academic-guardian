@@ -67,7 +67,7 @@ const router = createRouter({
       path: "/admin",
       name: "admin",
       component: () => import("@/views/AdminView.vue"),
-      meta: { title: "教务端", sub: "规则配置、账号开通、全校看板与名单导出", role: "admin" },
+      meta: { title: "教务端", sub: "规则配置、账号开通与名单导出", role: "admin" },
     },
     {
       path: "/parent",

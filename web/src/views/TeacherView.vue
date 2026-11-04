@@ -13,7 +13,14 @@ import WeeklyAttend from "@/components/WeeklyAttend.vue";
 import { useNarrow } from "@/composables/useViewport";
 import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
-import type { ClassroomStudent, Level, TeacherClassroom } from "@/types";
+import type {
+  ClassroomStudent,
+  HwItem,
+  Level,
+  ScoreBand,
+  TeacherClassroom,
+  WeekAttend,
+} from "@/types";
 
 /**
  * 教师端（第五端）：任课老师视角。
@@ -113,8 +120,148 @@ const rows = computed(() => {
   return list;
 });
 
+/** 当前选中的那批学生：班级为空 = 全部 */
+const activeStudents = computed(() =>
+  classFilter.value
+    ? allStudents.value.filter((s) => s.class_name === classFilter.value)
+    : allStudents.value,
+);
+/** 是否在看「全部班级」——是的话图表直接用后端算好的整课数据 */
+const isAllClass = computed(() => !classFilter.value);
+
+/** 按给定学生集合重算期中分档，档位与后端 BUCKETS 保持一致 */
+function distOf(list: ClassroomStudent[]): ScoreBand[] {
+  const scores = list.map((s) => s.midterm).filter((v): v is number => v != null);
+  const buckets: { min: number; max: number; label: string }[] = [
+    { min: 90, max: 101, label: "90 分以上" },
+    { min: 80, max: 90, label: "80-89" },
+    { min: 70, max: 80, label: "70-79" },
+    { min: 60, max: 70, label: "60-69" },
+    { min: 0, max: 60, label: "60 分以下" },
+  ];
+  const total = scores.length || 1;
+  return buckets.map((b) => {
+    const count = scores.filter((v) => v >= b.min && v < b.max).length;
+    return { label: b.label, count, pct: Math.round((count / total) * 1000) / 10 };
+  });
+}
+
+/** 按给定学生集合重算逐周出勤（学生级 attendance 明细自带 week 字段） */
+function weeklyOf(list: ClassroomStudent[]): WeekAttend[] {
+  const map = new Map<number, WeekAttend>();
+  for (const s of list) {
+    for (const a of s.attendance || []) {
+      let w = map.get(a.week);
+      if (!w) {
+        w = { week: a.week, absent: 0, late: 0, present: 0, total: 0 };
+        map.set(a.week, w);
+      }
+      w.total += 1;
+      if (a.status === "absent") w.absent += 1;
+      else if (a.status === "late") w.late += 1;
+      else w.present += 1;
+    }
+  }
+  return [...map.values()].sort((a, b) => a.week - b.week);
+}
+
+/** 图表用的期中分档：全部班级用后端权威数据，选班时按该班学生重算 */
+const scoreDist = computed<ScoreBand[]>(() =>
+  isAllClass.value ? course.value?.dist || [] : distOf(activeStudents.value),
+);
+
+/** 图表用的逐周出勤：全部班级用后端数据，选班时按该班学生重算 */
+const weekAttend = computed<WeekAttend[]>(() =>
+  isAllClass.value ? course.value?.attend.weekly || [] : weeklyOf(activeStudents.value),
+);
+
+/** 逐次作业提交：口径与后端一致（迟交也算交），选班时按该班学生重算 */
+const hwItems = computed<HwItem[]>(() => {
+  if (isAllClass.value) return course.value?.hw.items || [];
+  const map = new Map<
+    string,
+    { title: string; due: string; submitted: number; late: number; missing: number }
+  >();
+  for (const s of activeStudents.value) {
+    for (const hw of s.homework || []) {
+      let slot = map.get(hw.title);
+      if (!slot) {
+        slot = { title: hw.title, due: hw.due, submitted: 0, late: 0, missing: 0 };
+        map.set(hw.title, slot);
+      }
+      if (hw.status === "submitted") slot.submitted += 1;
+      else if (hw.status === "late") {
+        slot.submitted += 1;
+        slot.late += 1;
+      } else slot.missing += 1;
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => (a.due || "").localeCompare(b.due || ""))
+    .map((r) => {
+      const total = r.submitted + r.missing;
+      return {
+        id: r.title,
+        title: r.title,
+        due: r.due,
+        assigned: "",
+        submitted: r.submitted,
+        late: r.late,
+        missing: r.missing,
+        total,
+        rate: total ? Math.round((r.submitted / total) * 1000) / 10 : 0,
+        ontime_rate: total ? Math.round(((r.submitted - r.late) / total) * 1000) / 10 : 0,
+      };
+    });
+});
+
+/** 选班时图表下方那行汇总（旷课/迟到/均分等），与图保持一致 */
+const classAgg = computed(() => {
+  const list = activeStudents.value;
+  const mids = list.map((s) => s.midterm).filter((v): v is number => v != null);
+  let absent = 0;
+  let late = 0;
+  let total = 0;
+  for (const s of list) {
+    for (const a of s.attendance || []) {
+      total += 1;
+      if (a.status === "absent") absent += 1;
+      else if (a.status === "late") late += 1;
+    }
+  }
+  const sorted = [...mids].sort((a, b) => a - b);
+  const midAvg = mids.length
+    ? Math.round((mids.reduce((a, b) => a + b, 0) / mids.length) * 10) / 10
+    : 0;
+  const median = sorted.length
+    ? sorted.length % 2
+      ? sorted[(sorted.length - 1) / 2]
+      : Math.round(((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2) * 10) / 10
+    : 0;
+  const mean = midAvg;
+  const std = mids.length
+    ? Math.round(
+        Math.sqrt(mids.reduce((a, b) => a + (b - mean) ** 2, 0) / mids.length) * 10,
+      ) / 10
+    : 0;
+  return {
+    midAvg,
+    median,
+    std,
+    lowest: sorted[0] ?? 0,
+    highest: sorted[sorted.length - 1] ?? 0,
+    passRate: mids.length
+      ? Math.round((mids.filter((v) => v >= 60).length / mids.length) * 1000) / 10
+      : 0,
+    absent,
+    late,
+    total,
+  };
+});
+
+/** 筛选按钮上的计数跟随所选班级 */
 const counts = computed(() => {
-  const list = allStudents.value;
+  const list = activeStudents.value;
   return {
     all: list.length,
     risk: list.filter((s) => s.level !== "green").length,
@@ -124,26 +271,69 @@ const counts = computed(() => {
   };
 });
 
+/** 「全部班级」卡片上的总计，始终按全体算 */
+const allCounts = computed(() => {
+  const list = allStudents.value;
+  return {
+    all: list.length,
+    risk: list.filter((s) => s.level !== "green").length,
+    hw: list.filter((s) => s.hw_missing > 0).length,
+  };
+});
+
 const stats = computed(() => {
   const c = course.value;
   if (!c) return [];
-  const watch = c.risk.red + c.risk.yellow;
+
+  // 全部班级：沿用后端算好的整课统计
+  if (isAllClass.value) {
+    const watch = c.risk.red + c.risk.yellow;
+    return [
+      { value: c.students, label: "修课学生 · 人" },
+      {
+        value: c.mid_avg,
+        label: `期中均分 · 年级 ${c.grade_avg}（${c.gap_grade > 0 ? "+" : ""}${c.gap_grade}）`,
+        tone: "" as const,
+      },
+      // dist[4] 是「60 分以下」档，count 才是不及格人数；
+      // 总人数减它是及格人数，别写反。
+      { value: `${c.pass_rate}%`, label: `及格率 · 不及格 ${c.dist[4].count} 人` },
+      { value: `${c.attend.rate}%`, label: `课堂出勤率 · 已上 ${c.attend.sessions} 次` },
+      { value: `${c.hw.rate}%`, label: `作业提交率 · 已布置 ${c.hw.assigned} 次` },
+      {
+        value: watch,
+        label: `需关注 · 红 ${c.risk.red} / 黄 ${c.risk.yellow}`,
+        tone: (c.risk.red ? "red" : watch ? "amber" : "") as "red" | "amber" | "",
+      },
+    ];
+  }
+
+  // 选中某个班：按这个班的学生重算，切换卡片时数字要跟着变
+  const list = activeStudents.value;
+  const agg = classAgg.value;
+  const mids = list.map((s) => s.midterm).filter((v): v is number => v != null);
+  const red = list.filter((s) => s.level === "red").length;
+  const yellow = list.filter((s) => s.level === "yellow").length;
+  const watch = red + yellow;
+  const hwAssigned = list.reduce((a, s) => a + (s.hw_assigned || 0), 0);
+  const hwSubmitted = list.reduce((a, s) => a + (s.hw_submitted || 0), 0);
+  const hwRate = hwAssigned ? Math.round((hwSubmitted / hwAssigned) * 1000) / 10 : 0;
   return [
-    { value: c.students, label: "修课学生 · 人" },
+    { value: list.length, label: "修课学生 · 人" },
+    { value: agg.midAvg, label: "期中均分 · 本班", tone: "" as const },
     {
-      value: c.mid_avg,
-      label: `期中均分 · 年级 ${c.grade_avg}（${c.gap_grade > 0 ? "+" : ""}${c.gap_grade}）`,
-      tone: "" as const,
+      value: `${agg.passRate}%`,
+      label: `及格率 · 不及格 ${mids.length - mids.filter((v) => v >= 60).length} 人`,
     },
-    // dist[4] 是「60 分以下」档，count 才是不及格人数；
-    // 总人数减它是及格人数，别写反。
-    { value: `${c.pass_rate}%`, label: `及格率 · 不及格 ${c.dist[4].count} 人` },
-    { value: `${c.attend.rate}%`, label: `课堂出勤率 · 已上 ${c.attend.sessions} 次` },
-    { value: `${c.hw.rate}%`, label: `作业提交率 · 已布置 ${c.hw.assigned} 次` },
+    {
+      value: `${agg.total ? Math.round(((agg.total - agg.absent - agg.late) / agg.total) * 1000) / 10 : 0}%`,
+      label: `课堂出勤率 · 已上 ${c.attend.sessions} 次`,
+    },
+    { value: `${hwRate}%`, label: `作业提交率 · 已布置 ${c.hw.assigned} 次` },
     {
       value: watch,
-      label: `需关注 · 红 ${c.risk.red} / 黄 ${c.risk.yellow}`,
-      tone: (c.risk.red ? "red" : watch ? "amber" : "") as "red" | "amber" | "",
+      label: `需关注 · 红 ${red} / 黄 ${yellow}`,
+      tone: (red ? "red" : watch ? "amber" : "") as "red" | "amber" | "",
     },
   ];
 });
@@ -260,7 +450,7 @@ const profile = computed(() => room.value?.teacher || null);
       <section v-if="classGroups.length > 1" class="card class-overview">
         <div class="card-head">
           <h3>所教班级（{{ classGroups.length }} 个）</h3>
-          <span class="hint">点一个班切换下方名单到该班；点「全部班级」恢复</span>
+          <span class="hint">点一个班把下方名单与四张统计图一起切到该班；点「全部班级」恢复</span>
         </div>
         <div class="class-cards">
           <button
@@ -269,10 +459,10 @@ const profile = computed(() => room.value?.teacher || null);
             @click="classFilter = ''"
           >
             <b>全部班级</b>
-            <span class="cc-total">{{ counts.all }} 人</span>
+            <span class="cc-total">{{ allCounts.all }} 人</span>
             <span class="cc-break">
-              <i class="dot-red"></i>{{ counts.risk }}
-              <i class="dot-yel"></i>{{ counts.hw }}
+              <i class="dot-red"></i>{{ allCounts.risk }}
+              <i class="dot-yel"></i>{{ allCounts.hw }}
             </span>
           </button>
           <button
@@ -294,16 +484,26 @@ const profile = computed(() => room.value?.teacher || null);
       </section>
 
       <!-- ③ 四张课堂图：分布、节奏、作业、班级差 -->
+      <div v-if="!isAllClass" class="scope-bar">
+        <span class="scope-dot"></span>
+        四张图已切到 <b>{{ classFilter }}</b>（{{ activeStudents.length }} 人）；点「全部班级」看整门课
+      </div>
       <div class="grid2">
         <div class="card">
           <div class="card-head">
             <h3>期中成绩分布</h3>
             <span class="hint">看形状不看均分：两个班均分一样，教法可能完全不同</span>
           </div>
-          <ScoreBands :dist="course.dist" :avg="course.mid_avg" :pass-rate="course.pass_rate" />
+          <ScoreBands
+            :dist="scoreDist"
+            :avg="isAllClass ? course.mid_avg : classAgg.midAvg"
+            :pass-rate="isAllClass ? course.pass_rate : classAgg.passRate"
+          />
           <div class="band-foot tiny muted">
-            最低 {{ course.lowest }} · 最高 {{ course.highest }} · 中位数 {{ course.median }} ·
-            标准差 {{ course.std }}（越小说明整体越整齐）
+            最低 {{ isAllClass ? course.lowest : classAgg.lowest }} ·
+            最高 {{ isAllClass ? course.highest : classAgg.highest }} ·
+            中位数 {{ isAllClass ? course.median : classAgg.median }} ·
+            标准差 {{ isAllClass ? course.std : classAgg.std }}（越小说明整体越整齐）
           </div>
         </div>
 
@@ -312,9 +512,10 @@ const profile = computed(() => room.value?.teacher || null);
             <h3>逐周出勤</h3>
             <span class="hint">哪一周开始塌的，比一共缺了几次更有用</span>
           </div>
-          <WeeklyAttend :weekly="course.attend.weekly" />
+          <WeeklyAttend :weekly="weekAttend" />
           <div class="band-foot tiny muted">
-            本周课堂累计旷课 {{ course.attend.absent }} 人次、迟到 {{ course.attend.late }} 人次
+            本周课堂累计旷课 {{ isAllClass ? course.attend.absent : classAgg.absent }} 人次、迟到
+            {{ isAllClass ? course.attend.late : classAgg.late }} 人次
           </div>
         </div>
 
@@ -323,7 +524,7 @@ const profile = computed(() => room.value?.teacher || null);
             <h3>逐次作业提交</h3>
             <span class="hint">总提交率会掩盖「最后一次塌一半」这种情况</span>
           </div>
-          <HwFlow :items="course.hw.items" />
+          <HwFlow :items="hwItems" />
         </div>
 
         <div class="card">
@@ -754,6 +955,31 @@ const profile = computed(() => room.value?.teacher || null);
   line-height: 1.7;
   border-top: 1px dashed var(--line);
   padding-top: 9px;
+}
+
+/* ---------- 图表范围提示：切到某个班时四张图前面挂一条 ---------- */
+.scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 14px 0 -2px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: var(--brand-soft, #fdf1de);
+  border: 1px solid #f0d9b5;
+  font-size: 12.5px;
+  color: var(--text-2, #5d4b3a);
+}
+.scope-bar b {
+  color: var(--brand, #b45309);
+  font-weight: 600;
+}
+.scope-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand, #b45309);
+  flex: none;
 }
 
 /* ---------- 名单 ---------- */

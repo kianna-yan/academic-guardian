@@ -25,11 +25,19 @@ export interface NavGroup {
 
 /**
  * 模块分区：按"什么时候用"分组，而不是按开发顺序罗列。
- * - 学生端：学习空间（每节课都在用）→ 我的成长（看得见）→ 学业档案（看结果）→ AI 顾问（随时问）
+ * - 五个端统一把「AI 顾问」放在最上面：对话是主入口，进来第一眼就该看见它，
+ *   翻到侧栏最底部才找到反而像个附赠功能。
+ * - 学生端其余分区：学习空间（每节课都在用）→ 我的成长（看得见）→ 学业档案（看结果）
  * - 其他端：各自的业务区域，锚点对应页面里的区块
  */
 export const MODULES: Record<Role, NavGroup[]> = {
   student: [
+    {
+      key: "ai",
+      label: "AI 顾问",
+      caption: "随时问",
+      items: [{ key: "chat", label: "学业对话", to: "/student", chat: true, hint: "基于你自己的数据回答，数字都由引擎算" }],
+    },
     {
       key: "learn",
       label: "学习空间",
@@ -61,14 +69,14 @@ export const MODULES: Record<Role, NavGroup[]> = {
         { key: "appeal", label: "复核与异议", to: "/student#appeal", hint: "记录不对可以提复核" },
       ],
     },
+  ],
+  counselor: [
     {
       key: "ai",
       label: "AI 顾问",
       caption: "随时问",
-      items: [{ key: "chat", label: "学业对话", to: "/student", chat: true, hint: "基于你自己的数据回答，数字都由引擎算" }],
+      items: [{ key: "chat", label: "辅导员对话", to: "/counselor", chat: true, hint: "批量问、点名问都行" }],
     },
-  ],
-  counselor: [
     {
       key: "contact",
       label: "家校沟通",
@@ -86,14 +94,14 @@ export const MODULES: Record<Role, NavGroup[]> = {
         { key: "forest", label: "智慧森林", to: "/counselor#forest", hint: "每个学生一棵树，每班一片森林：颜色一眼看出整体长势" },
       ],
     },
+  ],
+  admin: [
     {
       key: "ai",
       label: "AI 顾问",
       caption: "随时问",
-      items: [{ key: "chat", label: "辅导员对话", to: "/counselor", chat: true, hint: "批量问、点名问都行" }],
+      items: [{ key: "chat", label: "教务对话", to: "/admin", chat: true, hint: "全校统计、规则口径与校规条款，问我就行" }],
     },
-  ],
-  admin: [
     {
       key: "board",
       label: "全局看板",
@@ -111,14 +119,14 @@ export const MODULES: Record<Role, NavGroup[]> = {
         { key: "curriculum", label: "课程与教师", to: "/admin#curriculum", hint: "导入任课教师与联系方式" },
       ],
     },
+  ],
+  teacher: [
     {
       key: "ai",
       label: "AI 顾问",
       caption: "随时问",
-      items: [{ key: "chat", label: "教务对话", to: "/admin", chat: true, hint: "全校统计、规则口径与校规条款，问我就行" }],
+      items: [{ key: "chat", label: "教学对话", to: "/teacher", chat: true, hint: "我课上学生的考勤、作业与风险，问我就行" }],
     },
-  ],
-  teacher: [
     {
       key: "class",
       label: "课堂",
@@ -131,19 +139,20 @@ export const MODULES: Record<Role, NavGroup[]> = {
       key: "resources",
       label: "教学资源",
       caption: "给学生用",
+      // 真题与网课在同一页的两个页签里，菜单只留一个入口，
+      // 免得侧栏出现两条都跳同一个地址的项。
       items: [
-        { key: "exams", label: "历年真题", to: "/teacher/resources", hint: "上传历年期末试卷与参考答案给学生复习" },
-        { key: "tutorials", label: "网课资源", to: "/teacher/resources", hint: "上传网课视频/讲义给学生自学" },
+        { key: "resources", label: "历年真题 · 网课", to: "/teacher/resources", hint: "上传历年期末试卷与网课视频/讲义，学生在「学习资源」里下载" },
       ],
     },
+  ],
+  parent: [
     {
       key: "ai",
       label: "AI 顾问",
       caption: "随时问",
-      items: [{ key: "chat", label: "教学对话", to: "/teacher", chat: true, hint: "我课上学生的考勤、作业与风险，问我就行" }],
+      items: [{ key: "chat", label: "家校对话", to: "/parent", chat: true, hint: "孩子这学期怎么样，用通俗的话讲给你听" }],
     },
-  ],
-  parent: [
     {
       key: "contact",
       label: "家校沟通",
@@ -158,12 +167,6 @@ export const MODULES: Record<Role, NavGroup[]> = {
       items: [
         { key: "overview", label: "状态解读", to: "/parent#overview", hint: "学校已做什么、家里可以怎么配合" },
       ],
-    },
-    {
-      key: "ai",
-      label: "AI 顾问",
-      caption: "随时问",
-      items: [{ key: "chat", label: "家校对话", to: "/parent", chat: true, hint: "孩子这学期怎么样，用通俗的话讲给你听" }],
     },
   ],
 };

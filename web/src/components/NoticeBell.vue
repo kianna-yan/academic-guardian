@@ -60,8 +60,14 @@ function markAll() {
   void notices.markRead(notices.unread.map((n) => n.id));
 }
 
-function checkTodo(t: { id: string; done: boolean }) {
-  if (t.done) void notices.finishTodo(t.id);
+/**
+ * 勾选待办。
+ * 必须读 checkbox 自己的 checked，不能读 t.done——@change 触发时 t.done 还是 false，
+ * 以前写成 `if (t.done)` 就永远进不去，表现为「勾了没反应、也不消失」。
+ */
+function checkTodo(t: { id: string; done: boolean }, ev: Event) {
+  const on = (ev.target as HTMLInputElement).checked;
+  if (on) void notices.finishTodo(t.id);
 }
 
 async function resolve(id: string, action: "accept" | "reject") {
@@ -147,9 +153,9 @@ function statusLabel(s: string) {
 
         <!-- 待办 -->
         <template v-else-if="notices.tab === 'todo'">
-          <div v-if="!notices.todos.length" class="empty">暂无待办事项。</div>
-          <label v-for="t in notices.todos" :key="t.id" class="item todo" :class="{ done: t.done }">
-            <input :checked="t.done" type="checkbox" @change="checkTodo(t)" />
+          <div v-if="!notices.openTodos.length" class="empty">待办都清完了，暂时没有要跟进的事。</div>
+          <label v-for="t in notices.openTodos" :key="t.id" class="item todo" :class="{ done: t.done }">
+            <input :checked="t.done" type="checkbox" @change="checkTodo(t, $event)" />
             <div class="item-main">
               <b>{{ t.title }}</b>
               <p>{{ t.detail }}</p>

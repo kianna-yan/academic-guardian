@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore, HOME_OF } from "@/stores/auth";
 import type { Role } from "@/types";
@@ -39,7 +40,7 @@ const ENTRIES: Entry[] = [
   {
     key: "admin",
     name: "教务端",
-    sub: "规则配置、账号开通与全校看板",
+    sub: "规则配置、账号开通与名单导出",
     accountLabel: "账号",
     placeholder: "请输入教务账号",
     icon: "教",
@@ -74,17 +75,31 @@ const demoParent = computed(() => app.meta?.demo?.parent || demoStudent.value);
 const demoTeacher = computed(() => app.meta?.demo?.teacher || "2024014501");
 
 /**
- * 初始密码表：五个端一张表列全，跟登录接口里的 DEFAULT_PASSWORD 一一对应
+ * 端口示例表：五个端一张表列全，跟登录接口里的 DEFAULT_PASSWORD 一一对应
  * （0000 学生 / 1111 辅导员 / 2222 教务 / 3333 家长 / 4444 教师）。
- * 之前漏了教师端，演示时只能靠猜，这里补齐并统一成「端口 · 账号 · 密码」三列。
+ * 叫「示例」而不是「初始密码」——这张表是给人看着登录用的，不是账号的真实初始密码说明。
+ * 家长端账号直接用孩子的真实学号，写「孩子学号」四个字等于让人自己猜。
  */
 const HINTS = computed<{ key: Role; icon: string; name: string; account: string; password: string }[]>(() => [
   { key: "student", icon: "学", name: "学生端", account: demoStudent.value, password: "0000" },
   { key: "counselor", icon: "辅", name: "辅导员端", account: "2024014589", password: "1111" },
   { key: "admin", icon: "教", name: "教务端", account: "1234567899", password: "2222" },
-  { key: "parent", icon: "家", name: "家长端", account: "孩子学号", password: "3333" },
+  { key: "parent", icon: "家", name: "家长端", account: demoParent.value, password: "3333" },
   { key: "teacher", icon: "师", name: "教师端", account: demoTeacher.value, password: "4444" },
 ]);
+
+/** 忘记密码：演示环境没有短信/邮箱通道，给出真实可走的两条路 */
+function forgot() {
+  void ElMessageBox.alert(
+    `演示环境不发短信也不发邮件，找回只能走人工：\n\n` +
+      `· 学生 / 家长：联系辅导员（工号 2024014589）或教务老师重置\n` +
+      `· 辅导员 / 教师：联系教务处（账号 1234567899）重置\n\n` +
+      `重置后回到初始密码，登录进来在右上角「修改密码」改掉即可。\n` +
+      `只是想先看看系统：点下方「端口示例」任意一行，账号和密码会自动填好。`,
+    "忘记密码怎么办",
+    { confirmButtonText: "知道了", customStyle: { whiteSpace: "pre-line", lineHeight: "1.7" } },
+  );
+}
 
 /**
  * 切换入口：清掉上一端的密码，避免把学生密码带进教务端。
@@ -221,8 +236,11 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
             />
           </label>
 
-          <label class="field">
-            <span>密码</span>
+          <div class="field">
+            <div class="field-head">
+              <span>密码</span>
+              <button type="button" class="forgot" @click="forgot">忘记密码？</button>
+            </div>
             <div class="pwd">
               <input
                 v-model="form.password"
@@ -234,7 +252,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
                 {{ showPwd ? "隐藏" : "显示" }}
               </button>
             </div>
-          </label>
+          </div>
 
           <p v-if="error" class="err">{{ error }}</p>
 
@@ -245,14 +263,14 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 
         <div class="hint-box">
           <div class="hint-head">
-            <b>初始密码</b>
+            <b>端口示例</b>
             <span>首次登录后请及时修改，右上角可改</span>
           </div>
           <div class="hint-cols" aria-hidden="true">
             <span></span>
             <span>端口</span>
             <span>账号</span>
-            <span class="ta-r">初始密码</span>
+            <span class="ta-r">密码</span>
           </div>
           <ul class="hint-list">
             <li v-for="h in HINTS" :key="h.key">
@@ -260,7 +278,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
                 class="hint-row"
                 :class="{ on: active === h.key }"
                 type="button"
-                :title="`点击填入${h.name}的账号与初始密码`"
+                :title="`点击填入${h.name}的示例账号与密码`"
                 @click="fill(h.key)"
               >
                 <span class="hr-ico">{{ h.icon }}</span>
@@ -271,7 +289,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
             </li>
           </ul>
           <p class="hint-foot">
-            点任意一行自动填入账号与初始密码，直接登录即可 · 演示学号 <b>{{ demoStudent }}</b>
+            点任意一行自动填入示例账号与密码，直接登录即可 · 演示学号 <b>{{ demoStudent }}</b>
           </p>
         </div>
       </section>
@@ -467,6 +485,32 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   font-size: 12px;
   color: var(--text-2);
   margin-bottom: 6px;
+}
+/* 密码行：左边标题，右边「忘记密码？」
+   做成标题行内的小按钮，不额外占一行，也不挤占输入框高度 */
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.field-head > span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.forgot {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--brand);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.forgot:hover {
+  color: #92400e;
 }
 .field input {
   width: 100%;

@@ -31,7 +31,9 @@ export const useNoticeStore = defineStore("notices", () => {
   const listeners = new Set<(items: NoticeItem[]) => void>();
 
   const unreadCount = computed(() => unread.value.length);
-  const todoCount = computed(() => todos.value.filter((t) => !t.done).length);
+  /** 面板只列「还没做的」：勾掉的待办直接消失，而不是留在列表里划横线 */
+  const openTodos = computed(() => todos.value.filter((t) => !t.done));
+  const todoCount = computed(() => openTodos.value.length);
   const messageUnread = computed(() =>
     threads.value.reduce((s, t) => s + t.unread, 0),
   );
@@ -118,9 +120,13 @@ export const useNoticeStore = defineStore("notices", () => {
   async function finishTodo(id: string) {
     const row = todos.value.find((t) => t.id === id);
     if (!row || row.done) return;
-    row.done = true;                    // 乐观更新，失败再回滚
+    row.done = true;                    // 先乐观置灰，接口回来再从列表里摘掉
     try {
       await api.finishTodo(id);
+      // 勾掉就消失：待办列表是「还欠着的事」，做完了不该继续占位。
+      // 以前只把 done 置 true，模板照样渲染出来划一道横线，看着像没生效。
+      const at = todos.value.findIndex((t) => t.id === id);
+      if (at >= 0) todos.value.splice(at, 1);
     } catch {
       row.done = false;
     }
@@ -150,11 +156,14 @@ export const useNoticeStore = defineStore("notices", () => {
   function openPanel(which: "notice" | "todo" | "appeals" | "message" = "notice") {
     tab.value = which;
     panelOpen.value = true;
+    // 打开面板永远先拉一次：别的端刚推过来的通知要当场看到，
+    // 不能等 25 秒那一轮轮询。
+    void refresh(true);
     if (which === "message") void refreshMessages(true);
   }
 
   return {
-    unread, todos, unreadCount, todoCount,
+    unread, todos, openTodos, unreadCount, todoCount,
     panelOpen, tab,
     threads, activeThread, messageUnread, canMessage, sending,
     refresh, start, stop, markRead, finishTodo, onArrive, openPanel,

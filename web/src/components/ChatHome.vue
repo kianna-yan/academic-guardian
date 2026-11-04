@@ -28,7 +28,7 @@ const HOME: Record<Role, { title: string; sub: string; dash: string }> = {
   admin: {
     title: "教务助手",
     sub: "全校统计与规则问题",
-    dash: "规则 · 全校看板",
+    dash: "规则 · 看板",
   },
   parent: {
     title: "家校助手",

@@ -338,6 +338,11 @@ class Checkins:
                 "updated_at": "",
                 **payload,
             }
+            # 与读取口径对齐：课表读的是 state / state_label，
+            # 保存接口原样回 understand 会让前端 onSaved 拿到 undefined，
+            # 表现就是「记完了课表格子还是待记」。
+            row["state"] = row.get("understand", "")
+            row["state_label"] = UNDERSTAND.get(row["state"], {}).get("label", "")
             from datetime import datetime
 
             now = datetime.now().strftime("%m-%d %H:%M")
