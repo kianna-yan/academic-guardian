@@ -245,6 +245,24 @@ class MessageCenter:
                     {"thread_id": msg["thread_id"], "sid": sid, "msg_id": msg["id"]})
         return msg
 
+    def recall(self, msg_id: str) -> dict | None:
+        """撤回一条消息（对话里点的动作执行后悔了）。
+
+        只允许撤回自己刚发的那条：从会话里摘掉，并给对方补一条「已撤回」通知，
+        免得家长端留下一句没有下文的独白。
+        """
+        with self._lock:
+            for _tid, rows in self._threads.items():
+                for i, m in enumerate(rows):
+                    if m.get("id") == msg_id:
+                        gone = rows.pop(i)
+                        NOTIFS.push(gone["to_role"], gone["sid"], "family_message",
+                                    f"{gone['from_name']} 撤回了一条消息",
+                                    "对方撤回了刚才那条家校消息。",
+                                    {"thread_id": gone["thread_id"], "sid": gone["sid"]})
+                        return gone
+        return None
+
     def threads_for(self, role: str, account: str, students: list[dict] | None = None) -> list[dict]:
         """返回该用户参与的会话列表（家长：1 条；导员：名下每个学生一条）。
 

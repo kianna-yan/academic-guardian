@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
+from engine import actions as actions_mod
 from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, simulator, trend
 from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
@@ -1318,6 +1319,9 @@ def chat_stream(body: ChatIn, request: Request):
 
         if final.get("citations"):
             yield _sse("citations", final["citations"])
+        # 方案 C：回答末尾挂一张「要不要我替你做」的卡片，前端点了才执行
+        if final.get("action"):
+            yield _sse("action", final["action"])
         if final.get("suggestions"):
             yield _sse("suggestions", final["suggestions"])
         yield _sse("done", {
@@ -1388,6 +1392,191 @@ def add_intervention(sid: str, body: InterventionIn):
     }
     INTERVENTIONS.setdefault(sid, []).insert(0, item)
     return {"ok": True, "item": item}
+
+
+# ---------------------------------------------------------------------------
+# 方案 C「对话即操作」：AI 只 propose，人点确认才 execute
+# ---------------------------------------------------------------------------
+class ActionExecIn(BaseModel):
+    id: str
+    type: str
+    payload: dict = {}
+
+
+class ActionUndoIn(BaseModel):
+    id: str
+
+
+def _action_export_letter(aid: str, payload: dict, profile: dict) -> dict:
+    """导出文书：只排版，不落盘——真正的文件在点下载时由 /api/export 生成。"""
+    sid = (payload.get("sid") or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少学生学号")
+    kind = payload.get("letter_type") or "parent"
+    s = ENGINE.get(sid)
+    letter = _letter_of(sid, kind)
+    return {
+        "ok": True,
+        "message": f"《{letter.get('title') or '学业文书'}》已按模板排好，点下载保存到本机。",
+        "download_url": f"/api/export/letter/{sid}?type={kind}",
+        "filename": f"{letter.get('title') or '学业文书'}_{datetime.now().strftime('%Y%m%d')}.docx",
+        "target": s["name"],
+    }
+
+
+def _action_send_letter(aid: str, payload: dict, profile: dict) -> dict:
+    """发送家长信：SMTP 配了就真发，没配就产出 .eml（收件人已填好）。"""
+    from urllib.parse import quote
+
+    sid = (payload.get("sid") or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少学生学号")
+    letter = _letter_of(sid, "parent")
+    s = ENGINE.get(sid)
+    to_addr = (payload.get("to") or "").strip() or f"parent.{sid}@example.com"
+    res = exporter.send_letter_email(letter, to_addr)
+    if not res.get("ok"):
+        raise HTTPException(502, f"发送失败：{res.get('error', '未知错误')}")
+    if res.get("mode") == "smtp":
+        return {
+            "ok": True,
+            "mode": "smtp",
+            "message": f"已发送给 {s['name']} 的家长（{to_addr}）。",
+            "undo_note": "邮件已经发出，无法从收件箱撤回；撤销只回退系统里的留痕。",
+        }
+    return {
+        "ok": True,
+        "mode": "eml",
+        "message": f"当前未配置邮件服务器，已生成 {s['name']} 家长信的邮件文件（收件人已填好）。",
+        "download_url": f"/api/export/send/{sid}?to={quote(to_addr)}",
+        "filename": f"家长信_{s['name']}.eml",
+        "undo_note": "邮件文件不会被真正发出，撤销等于作废这次操作。",
+    }
+
+
+def _action_record(aid: str, payload: dict, profile: dict) -> dict:
+    """记入干预台账：这一条会打上 action_id，撤销时按它反查删除。"""
+    sid = (payload.get("sid") or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少学生学号")
+    if sid not in {x["id"] for x in DATASET["students"]}:
+        raise HTTPException(404, "学生不存在")
+    s = ENGINE.get(sid)
+    COUNTER["n"] += 1
+    item = {
+        "id": COUNTER["n"],
+        "title": payload.get("title") or "学业谈话",
+        "status": payload.get("status") or "已完成",
+        "note": payload.get("note") or "",
+        "created_at": datetime.now().strftime("%m-%d %H:%M"),
+        "action_id": aid,
+    }
+    INTERVENTIONS.setdefault(sid, []).insert(0, item)
+    return {
+        "ok": True,
+        "message": f"已写入 {s['name']}（{s['class_name']}）的干预台账：{item['title']} · {item['status']}。",
+        "ref": str(item["id"]),
+    }
+
+
+def _action_message(aid: str, payload: dict, profile: dict) -> dict:
+    """给家长发一条沟通消息：走家校沟通同一条链路，家长端立刻能看到。"""
+    sid = (payload.get("sid") or "").strip()
+    text = (payload.get("text") or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少学生学号")
+    if not text:
+        raise HTTPException(400, "消息内容不能为空")
+    if len(text) > 500:
+        raise HTTPException(400, "单条消息不超过 500 字")
+    s = ENGINE.get(sid)
+    msg = MESSAGES.send("counselor", COUNSELOR_ACCOUNT, profile.get("name") or "辅导员",
+                        "parent", sid, f"{s['name']} 家长", text, sid)
+    return {
+        "ok": True,
+        "message": f"已发给 {s['name']} 的家长，家长端在「家校沟通」里能看到。",
+        "ref": msg["id"],
+    }
+
+
+ACTION_HANDLERS = {
+    "export_letter": _action_export_letter,
+    "send_letter": _action_send_letter,
+    "record_intervention": _action_record,
+    "message_parent": _action_message,
+}
+
+
+@app.post("/api/actions/execute")
+def actions_execute(body: ActionExecIn, request: Request):
+    """第二段：用户点了「确认执行」才真正落地。同一个 id 只生效一次。"""
+    p = request.state.profile
+    role = p.get("role")
+    if body.type not in actions_mod.WHITELIST:
+        raise HTTPException(404, "未知的动作类型")
+    if not actions_mod.allowed(role, body.type):
+        raise HTTPException(403, "当前角色不能执行这个动作")
+    prev = actions_mod.ACTION_STORE.begin(
+        body.id, body.type, body.payload, actor=p.get("account") or "")
+    if prev is not None:
+        # 幂等命中：刷新页面再点、连点两下，都返回首次结果，不重复写入
+        return prev
+    try:
+        result = ACTION_HANDLERS[body.type](body.id, body.payload, p)
+    except HTTPException as exc:
+        actions_mod.ACTION_STORE.fail(body.id, str(exc.detail))
+        raise
+    except Exception as exc:  # noqa: BLE001
+        actions_mod.ACTION_STORE.fail(body.id, str(exc))
+        raise HTTPException(500, f"执行失败：{exc}")
+    return actions_mod.ACTION_STORE.finish(body.id, result)
+
+
+@app.post("/api/actions/undo")
+def actions_undo(body: ActionUndoIn, request: Request):
+    """执行错了能退回来：删记录 / 撤回消息；文书与邮件只回退留痕。"""
+    profile = request.state.profile
+    role = profile.get("role")
+    row = actions_mod.ACTION_STORE.get(body.id)
+    if not row:
+        raise HTTPException(404, "没有这个动作的执行记录")
+    if not actions_mod.allowed(role, row.get("type") or ""):
+        raise HTTPException(403, "当前角色不能撤销这个动作")
+    if row.get("state") == "undone":
+        return {"ok": True, "state": "undone", "message": "这个动作已经撤销过了。"}
+    if row.get("state") != "done":
+        raise HTTPException(400, "只有执行成功的动作才能撤销")
+
+    atype = row.get("type")
+    payload = row.get("payload") or {}
+    note = ""
+    if atype == "record_intervention":
+        sid = payload.get("sid") or ""
+        rows = INTERVENTIONS.get(sid) or []
+        hit = next((i for i, it in enumerate(rows) if it.get("action_id") == body.id), None)
+        if hit is None:
+            note = "台账里已经没有这条记录。"
+        else:
+            rows.pop(hit)
+            note = "已从干预台账删除这条记录。"
+    elif atype == "message_parent":
+        ref = (row.get("result") or {}).get("ref")
+        gone = MESSAGES.recall(str(ref)) if ref else None
+        note = "已撤回发给家长的那条消息。" if gone else "那条消息已经不在了。"
+    else:
+        note = (row.get("result") or {}).get("undo_note") or "这次操作只回退了系统留痕。"
+
+    actions_mod.ACTION_STORE.mark_undone(body.id, note)
+    return {"ok": True, "state": "undone", "message": note}
+
+
+@app.get("/api/actions/{aid}")
+def actions_get(aid: str):
+    """卡片刷新后回填真实状态：页面重开也知道这张卡到底执行过没有。"""
+    row = actions_mod.ACTION_STORE.get(aid)
+    if not row:
+        return {"id": aid, "state": "proposed"}
+    return row
 
 
 class _HashedAssets(StaticFiles):

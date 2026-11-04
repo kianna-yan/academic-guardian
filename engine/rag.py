@@ -101,6 +101,9 @@ class KnowledgeBase:
             c = dict(self.chunks[i])
             c["score"] = round(score, 2)
             c["citation"] = f"{c['school']}·{c['title']}"
+            # 前端按 kind 分组展示：policy 走「校规依据」，data 走「数据依据」，
+            # letter 走「文书依据」。原文只在点开时才展开，避免首屏塞满几 KB 条文。
+            c["kind"] = "policy"
             out.append(c)
         # school 限定太严导致一条都没命中时，回退全库再检索一次，
         # 避免「配了学校名但学生问的是通用政策」时返回空回答

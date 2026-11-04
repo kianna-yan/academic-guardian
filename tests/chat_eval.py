@@ -118,6 +118,62 @@ CASES: list[dict] = [
      "q": "大三软件工程班的学生情况", "kind": "边界",
      "must_contain": ["不在", "无法", "没有", "只能", "只覆盖", "任课"],
      "note": "跨出自己任教范围，必须说不"},
+
+    # ---------- 四、成绩类（11.3 新增，回归「系统里没有具体成绩信息」）----------
+    # 这一类原来没有工具能取分数，模型只能答「系统里没有显示具体的课程成绩信息」。
+    # 判据是回答里必须出现 engine/scores 算出来的真实分数。
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我最好的课是哪一门", "kind": "成绩",
+     "must_contain": ["分"], "note": "必须给出具体课名与分数，不能再说没有成绩数据"},
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我数据结构考了多少分", "kind": "成绩",
+     "must_contain": ["分"], "note": "单科分数"},
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我们班谁成绩最好", "kind": "成绩",
+     "must_contain": ["本人", "自己", "只能", "名"], "note": "学生只能看本人名次"},
+    {"role": "parent", "acc": "20240067", "pwd": "3333",
+     "q": "孩子哪门课最差", "kind": "成绩",
+     "must_contain": ["分"], "note": "家长端也要能答成绩"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "计科2402谁成绩最好", "kind": "成绩",
+     "must_contain": ["苏欣怡"], "note": "班级成绩排名，必须点名到人"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "计科2404班平均分多少", "kind": "成绩",
+     "must_contain": ["78.9", "79"], "note": "班级均分"},
+
+    # ---------- 五、课表 / 期末试算 / 待办 / 培养方案 ----------
+    # 这一批的共同病根：页面上有数据，工具层没有入口，模型只能答「系统里没有」。
+    # 判据是回答里必须落到具体节次、分数或学分，而不是一句"查不到"。
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "明天有没有数据结构课", "kind": "课表",
+     "must_contain": ["节"], "note": "必须给到节次，不能再说没有上课时间安排"},
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我这周的课表", "kind": "课表",
+     "must_contain": ["节"], "note": "整周课表，要带日期与节次"},
+    {"role": "parent", "acc": "20240067", "pwd": "3333",
+     "q": "孩子周三有课吗", "kind": "课表",
+     "must_contain": ["节", "课"], "note": "家长问某一天有没有课"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "戴永康这周课表", "kind": "课表",
+     "must_contain": ["节"], "note": "辅导员代查学生课表"},
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我期末要考多少才不挂科", "kind": "课表",
+     "must_contain": ["分"], "note": "期末试算，必须按考核权重算出分数"},
+    {"role": "student", "acc": "20240067", "pwd": "0000",
+     "q": "我有什么待办", "kind": "课表",
+     "must_contain": ["待办", "通知"], "note": "通知与待办"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "毕业要修多少学分", "kind": "课表",
+     "must_contain": ["学分"], "note": "培养方案与学分要求"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "计科2402这周整体怎么样", "kind": "课表",
+     "must_contain": ["人"], "note": "班级简报，要落到人数与风险构成"},
+    {"role": "counselor", "acc": "2024014589", "pwd": "1111",
+     "q": "还有谁的异议没处理", "kind": "课表",
+     "must_contain": ["异议"], "note": "异议中心，不能被「谁」抓成风险名单"},
+    {"role": "parent", "acc": "20240067", "pwd": "3333",
+     "q": "辅导员有没有给我发消息", "kind": "课表",
+     "must_contain": ["消息", "辅导员"], "note": "家校消息，不能答成系统通知"},
 ]
 
 
@@ -150,7 +206,7 @@ def _judge(case: dict, result: dict) -> tuple[bool, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--only", choices=["取数", "通用", "边界"], help="只跑某一类")
+    ap.add_argument("--only", choices=["取数", "通用", "边界", "成绩", "课表"], help="只跑某一类")
     args = ap.parse_args()
 
     cases = [c for c in CASES if not args.only or c["kind"] == args.only]

@@ -14,7 +14,9 @@ from __future__ import annotations
 import re
 import time
 
+from . import actions as actions_mod
 from . import llm, trend as trend_mod
+from .evidence import build as build_evidence
 from .letters import counselor_brief
 from .memory import ConversationMemory, memory_key
 from .rag import KnowledgeBase
@@ -32,6 +34,29 @@ LETTER_WORDS = ["告知函", "家长信", "通知书", "信件", "周报", "报�
 # 成绩走势单独成类：「我退步了吗」「这学期在涨还是掉」都要能答
 TREND_WORDS = ["趋势", "走势", "成绩变化", "退步", "进步", "下滑", "上升", "名次",
                "排名", "排第几", "曲线", "起伏", "越来越", "涨", "掉", "变化"]
+# 成绩查询：分数、单科强弱、班内名次。
+# 之前这一整类没有意图，全落 unknown→模型，而模型手里没有任何能取分数的工具，
+# 只能答「系统里没有显示具体的课程成绩信息」——学生端、家长端、辅导员端全中招。
+SCORE_WORDS = ["成绩", "分数", "考了", "考得", "多少分", "平均分", "均分", "单科",
+               "哪门课", "哪一科", "最好的课", "最差的课", "最好", "最差", "最强", "最弱",
+               "排名", "名次", "排第几", "第几名", "高分段", "及格率", "满分", "挂了几门"]
+# 课表：哪天有课、第几节、在哪间教室。
+# 页面「我的课表」一直有这份数据，但改造前没有任何工具能取到节次与教室，
+# 学生问「明天有没有数据结构课」只能得到「系统里没有具体时间安排」。
+SCHEDULE_WORDS = ["课表", "上课", "有课", "没课", "第几节", "几节课", "教室", "调课",
+                  "哪天有", "哪天没", "在哪上", "第几周"]
+# 期末试算：还没考的那场到底要拿多少分
+FORECAST_WORDS = ["期末", "才不挂", "能过", "能不能过", "要考多少", "拿多少分才能",
+                  "目标分", "想拿", "还有救", "稳过"]
+# 待办与通知：铃铛和待办列表里的东西
+TODO_WORDS = ["待办", "未读", "消息", "提醒", "待处理", "要做的事", "新通知", "有没有通知"]
+# 培养方案：毕业学分、必修选修
+PLAN_WORDS = ["培养方案", "毕业", "总学分", "还差多少学分", "要修多少学分",
+              "选修课", "必修课", "课程档案"]
+# 异议：对考勤/作业记录提出的申诉，现在处理到哪一步
+APPEAL_WORDS = ["异议", "申诉", "复核", "受理", "撤销记录", "提的意见"]
+# 家校消息：家长与辅导员之间的往来
+MSG_WORDS = ["消息", "私信", "聊天记录", "回了", "回复我", "有没有联系", "给我发"]
 # 谈话要点：辅导员在对话里直接要一份提纲，不用去页面点
 BRIEF_WORDS = ["谈话要点", "谈话提纲", "谈话大纲", "生成谈话", "谈一下", "怎么跟他谈",
                "怎么谈", "谈话建议", "给我一份谈话"]
@@ -302,6 +327,16 @@ class Agent:
             for c in self._classes:
                 if c.endswith(tail):
                     return c
+        # 「软件2401」这类专业名对不上库里的「计科2401」：
+        # 交给 scores.class_name_of 按班号/近似度认一次，认不出才返回 None。
+        # 不认的话会静默变成"全部班级"，用户以为在问一个班，拿到的是全校。
+        try:
+            from . import scores as scores_mod
+            hit, _cands = scores_mod.class_name_of(self.engine, text)
+            if hit:
+                return hit
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
     def _match_ordinal(self, text: str) -> int | None:
@@ -374,6 +409,14 @@ class Agent:
             "attendance": hit(ATTENDANCE_WORDS) * 1.8,
             "homework": hit(HOMEWORK_WORDS) * 1.8,
             "course": hit(COURSE_WORDS) * 1.8,
+            "score": hit(SCORE_WORDS) * 1.25,
+            "timetable": hit(SCHEDULE_WORDS) * 1.6,
+            "forecast": hit(FORECAST_WORDS) * 1.5,
+            "todo": hit(TODO_WORDS) * 1.4,
+            "plan": hit(PLAN_WORDS) * 1.5,
+            "appeal": hit(APPEAL_WORDS) * 2.6,
+            "message": hit(MSG_WORDS) * 1.6,
+            "class_report": 0.0,
         }
         if "怎么办" in text or "建议" in text:
             scores["advice"] += 1.5
@@ -395,9 +438,56 @@ class Agent:
         # 「这学期修了多少学分」是学分统计；只有带「降级/退学」语境才是政策条款
         if "学分" in text and not any(w in text for w in ["降级", "劝退", "退学", "规定", "要求"]):
             scores["course"] += 1.2
+        # 「哪门课最好/考了多少分」问的是分数本身，不是走势也不是名单。
+        # 出现涨/掉/趋势这类词时不算——「我的成绩涨还是掉」问的是走势，要让 trend 赢，
+        # 否则会被这里的加权抢走，答成一堆静态分数。
+        if (any(w in text for w in ["成绩", "分数", "哪门课", "哪一科", "最好的课", "最差的课",
+                                    "平均分", "考了", "考得", "分最高", "最高分", "多少分"])
+                and not any(w in text for w in ["涨", "掉", "趋势", "走势", "退步", "进步",
+                                                "下滑", "上升", "变化", "排名变化"])):
+            scores["score"] += 1.4
         # 老师联系方式必然伴随课程或「老师」本身，别让「数据结构」里的「结构」类词干扰
         if any(w in text for w in ["电话", "邮箱", "联系方式", "办公室", "答疑"]):
             scores["contact"] += 2
+        # 「明天有没有课 / 周三第几节在哪上」：属于课表，不能被「课」类词带走
+        if any(w in text for w in ["课表", "有课", "没课", "上课", "第几节", "几节课",
+                                   "教室", "调课"]):
+            scores["timetable"] += 2.2
+        elif any(w in text for w in ["明天", "后天", "今天", "下周", "这周", "本周",
+                                     "周一", "周二", "周三", "周四", "周五", "周末"]) and "课" in text:
+            scores["timetable"] += 1.8
+        # 「答疑几点」问的是老师，「周二几点上课」问的是课表——后者不能被联系方式抢走
+        if any(w in text for w in ["答疑", "办公室", "邮箱", "电话", "联系方式", "office"]):
+            scores["contact"] += 1.5
+            scores["timetable"] -= 2.5
+        # 期末试算：「我期末要考多少才不挂」既含「多少分」也含「期末」，要落在试算上
+        if "期末" in text or any(w in text for w in ["才不挂", "能不能过", "还有救", "要考多少"]):
+            scores["forecast"] += 2.2
+            if not any(w in text for w in ["已经考", "考了多少", "分数是"]):
+                scores["score"] -= 1.0
+        # 待办与通知：只有明确说「待办 / 未读 / 消息 / 提醒」才走这条；
+        # 「学校什么情况下会通知家长」是问制度，上面已经给 policy 加过分
+        if any(w in text for w in ["待办", "未读", "消息", "提醒", "待处理", "新通知"]):
+            scores["todo"] += 2.2
+        # 「还有谁的异议没处理」：一出现「异议/申诉」就该走异议中心，不能被「谁」抓成名单
+        if any(w in text for w in ["异议", "申诉", "复核"]):
+            scores["appeal"] += 2.6
+            scores["roster"] -= 1.5
+        # 家校消息：家长问「辅导员有没有发消息」，和系统通知是两回事
+        if any(w in text for w in ["消息", "私信", "聊天记录", "回复我"]):
+            scores["message"] += 2.6
+        # 「计科2402 这周整体怎么样」是班情简报，不是全校概览
+        if (any(c.lower() in text for c in self._classes)
+                and any(w in text for w in ["整体", "简报", "情况", "怎么样", "如何", "报告"])
+                and not any(w in text for w in ["成绩", "分数", "排名", "谁", "课表", "作业",
+                                                "考勤", "旷课", "风险分"])):
+            scores["class_report"] += 3.0
+        # 培养方案：「毕业要修多少学分」不能落进校规检索
+        if any(w in text for w in ["培养方案", "总学分", "要修多少学分", "选修课",
+                                   "必修课", "课程档案"]):
+            scores["plan"] += 2.4
+        elif "毕业" in text and "学分" in text:
+            scores["plan"] += 2.0
         best = max(scores, key=scores.get)
         # 没有任何学业关键词命中时返回 unknown，让各端走兜底说「答不准」，
         # 而不是默认 why 把「今天天气怎么样」也答成风险分
@@ -421,8 +511,11 @@ class Agent:
                 out.append(f"作业：应交 {raw['hw_assigned']} 次，实交 {raw['hw_submitted']} 次")
             elif k == "exam":
                 gap = round(raw["cohort_avg"] - raw["mid_avg"], 1)
-                tail = f"，低于班级均分 {gap} 分" if gap > 0 else "，高于班级均分"
-                out.append(f"期中：加权均分 {raw['mid_avg']}，班级均分 {raw['cohort_avg']}{tail}")
+                # cohort_avg 是「全年级同学分课程的加权均分」，不是本班均分——
+                # 标成「班级均分」会和 engine/scores.py 的班级均分（79.9）打架，
+                # 同一个回答里出现两个班均，用户会当成算错。
+                tail = f"，低于年级均分 {gap} 分" if gap > 0 else "，高于年级均分"
+                out.append(f"期中：加权均分 {raw['mid_avg']}，年级均分 {raw['cohort_avg']}{tail}")
             elif k == "engagement":
                 out.append(f"投入：平台每周登录 {s['engagement']['weekly_logins']} 次，视频完成率 {s['engagement']['video_rate']:.0%}，已 {s['engagement']['days_since_active']} 天未活跃")
             elif k == "history":
@@ -517,6 +610,227 @@ class Agent:
         return ([f"{who}本学期在修 {len(s['courses'])} 门课、共 {total} 学分："] + lines +
                 [f"培养方案要求 {cr['plan_total']} 学分，已修 {cr['earned']}，本学期在读 {cr['in_progress']}。"])
 
+    # ---------- 四类通用取数（五端共用，数据全部来自 tools 层）----------
+    def _compose_timetable(self, res: dict, who: str = "") -> list[str]:
+        """课表：日期 + 节次 + 教室。和「我的课表」页面同一份 calendar()。"""
+        if not res.get("ok"):
+            return [res.get("note") or "课表查不到。"]
+        d = res.get("data") or {}
+        rows = d.get("范围内的课") or []
+        when = d.get("查询范围") or "本周"
+        if not rows:
+            return [f"{who}{when}没有排课。" + (d.get("说明") or "")]
+        total = d.get("范围内课次") or len(rows)
+        more = f"，只列前 {len(rows)} 节" if total > len(rows) else ""
+        out = [f"{who}{when}共 {total} 节课（今天是 {d.get('今天', '')}{more}）："]
+        for r in rows:
+            tail = "" if r.get("状态") == "还没上" else "，已上过"
+            out.append(f"- **{r['日期']} {r['节次']}** {r['课程']}"
+                       f"（{r['教师']}，{r['教室']}{tail}）")
+        if d.get("说明"):
+            out.append(d["说明"])
+        return out
+
+    def _compose_forecast(self, res: dict, who: str = "") -> list[str]:
+        """期末试算：当前总评 + 期末要考多少才不挂（或达到目标分）。"""
+        if not res.get("ok"):
+            return [res.get("note") or "成绩构成查不到。"]
+        d = res.get("data") or {}
+        rows = d.get("课程") or []
+        if not rows:
+            return ["没有查到这门课的成绩构成。"]
+        target = d.get("目标总评")
+        head = (f"{who}本学期各课的考核构成（及格线 60 分，期末卷面还要过 45 分）"
+                + (f"，按目标总评 {target:g} 分算：" if target else "："))
+        out = [head]
+        for c in rows:
+            need = c.get("目标所需期末") or c.get("及格所需期末") or ""
+            out.append(f"- **{c['课程']}**：当前总评 {c['当前总评']} 分，期末占 {c['期末占比']}，{need}")
+        if d.get("最需要补的一门"):
+            out.append(f"最该先补的是 **{d['最需要补的一门']}**。")
+        out.append(d.get("口径") or "")
+        return [x for x in out if x]
+
+    def _compose_todo(self, res: dict, who: str = "") -> list[str]:
+        """本账号的未读通知与未完成待办。"""
+        if not res.get("ok"):
+            return [res.get("note") or "待办查不到。"]
+        d = res.get("data") or {}
+        out = [f"{who}当前有 **{d.get('未读通知', 0)}** 条未读通知、"
+               f"**{d.get('未完成待办', 0)}** 条未完成待办。"]
+        for n in d.get("通知") or []:
+            out.append(f"- 通知：{n.get('标题')}——{n.get('内容')}")
+        for t in d.get("待办") or []:
+            out.append(f"- 待办：**{t.get('事项')}**——{t.get('说明')}")
+        if d.get("说明"):
+            out.append(d["说明"])
+        return out
+
+    def _compose_plan(self, res: dict, who: str = "") -> list[str]:
+        """培养方案：学分要求与课程性质。"""
+        if not res.get("ok"):
+            return [res.get("note") or "培养方案查不到。"]
+        d = res.get("data") or {}
+        rows = d.get("本学期开设课程") or []
+        out = [f"{who}本学期开设 {len(rows)} 门课、共 {d.get('课程总学分')} 学分："]
+        out += [f"- {r['课程']}（{r['学分']} 学分·{r['性质']}·{r['教师']}·{r['上课节次']}·{r['周次']}）"
+                for r in rows]
+        if d.get("学分进度"):
+            out.append(d["学分进度"] + "。")
+        return out
+
+    def _compose_appeals(self, res: dict, who: str = "") -> list[str]:
+        """异议处理进度。"""
+        if not res.get("ok"):
+            return [res.get("note") or "异议查不到。"]
+        d = res.get("data") or {}
+        rows = d.get("明细") or []
+        if not rows:
+            return [d.get("说明") or "没有异议记录。"]
+        total = d.get("异议", d.get("异议总数", len(rows)))
+        pending = d.get("待处理")
+        head = f"{who}共 {total} 条异议" + (f"，其中 {pending} 条还没处理" if pending is not None else "") + "："
+        out = [head]
+        for r in rows:
+            tail = f"，答复：{r['答复']}" if r.get("答复") else ""
+            out.append(f"- {r.get('学生', '')}{r.get('课程', '')}·{r.get('类型', '')}："
+                       f"{r.get('理由', '')}（{r.get('状态', '')}{tail}）")
+        if d.get("说明"):
+            out.append(d["说明"])
+        return out
+
+    def _compose_messages(self, res: dict, who: str = "") -> list[str]:
+        """家校消息往来。"""
+        if not res.get("ok"):
+            return [res.get("note") or "消息查不到。"]
+        d = res.get("data") or {}
+        rows = d.get("最近消息") or d.get("最近会话") or []
+        if not rows:
+            return [d.get("说明") or "还没有家校消息往来。"]
+        peer = d.get("对方") or d.get("学生") or ""
+        head = (f"{who}与{peer}共 {d.get('消息数', len(rows))} 条消息："
+                if d.get("消息数") is not None else f"{who}最近的会话：")
+        out = [head]
+        for m in rows[:6]:
+            if "内容" in m:
+                out.append(f"- {m.get('方向')}：{m.get('内容')}（{m.get('时间')}）")
+            else:
+                out.append(f"- {m.get('学生')}：{m.get('最后一条')}（{m.get('时间')}）")
+        if d.get("未读"):
+            out.append(f"其中未读 {d['未读']} 条。")
+        return out
+
+    def _compose_class_report(self, res: dict, who: str = "") -> list[str]:
+        """班级学情简报（原样给出，不做改写）。"""
+        if not res.get("ok"):
+            return [res.get("note") or "班级简报查不到。"]
+        d = res.get("data") or {}
+        body = (d.get("简报") or "").replace("### ", "").replace("**", "")
+        return [body] if body else ["这份班级简报是空的。"]
+
+    def _compose_scores(self, sid: str, who: str = "") -> list[str]:
+        """单科成绩与班内位置。数字全部来自 engine.scores，和风险引擎同一套口径。"""
+        from . import scores as scores_mod
+        s = self.engine.get(sid)
+        d = scores_mod.student_scores(self.engine, s)
+        rows = sorted(d["各课成绩"], key=lambda x: -x["期中卷面"])
+        lines = [f"- {r['课程']}：期中 {r['期中卷面']:.0f} 分（本课班均 {r['班级均分']}，"
+                 f"班内第 {r['班内排名']}，{r['与班均相比']}）" for r in rows]
+        out = [f"{who}本学期 {len(rows)} 门课的期中成绩，按分数从高到低："] + lines
+        out.append(f"学分加权期中均分 **{d['学分加权期中均分']}**，"
+                   f"班内第 {d['班内排名']}（班级均分 {d['班级均分']}）。")
+        if d.get("分数最高的课"):
+            b = d["分数最高的课"]
+            out.append(f"分数最高的是 **{b['课程']}**（{b['期中卷面']:.0f} 分，{b['与班均相比']}）。")
+        if d.get("相对最弱的课"):
+            w = d["相对最弱的课"]
+            out.append(f"相对班均最吃力的是 **{w['课程']}**（{w['期中卷面']:.0f} 分，{w['与班均相比']}）。")
+        if d.get("上学期班级名次"):
+            out.append(f"作为参照，上学期{d['上学期均分']} 分、GPA {d['上学期GPA']}，"
+                       f"班级第 {d['上学期班级名次']}。")
+        return out
+
+    def _compose_class_scores(self, cls: str | None = None, course: str | None = None,
+                              who_limit: list[str] | None = None) -> list[str]:
+        """班级成绩排序。cls 为空时给各班横向对比。"""
+        from . import scores as scores_mod
+        engine = self.engine
+        if not cls:
+            classes = sorted({x["class_name"] for x in engine.students})
+            if who_limit:
+                classes = [c for c in classes if c in who_limit]
+            rows = []
+            for c in classes:
+                one = scores_mod.class_scores(engine, c, course, top_n=1)
+                top = (one.get("前几名") or [{}])[0]
+                rows.append((c, one.get("班均"), top.get("姓名"), top.get("分数"), one.get("总人数")))
+            rows.sort(key=lambda x: -(x[1] or 0))
+            head = (f"按{('「' + course + '」期中卷面') if course else '学分加权期中均分'}"
+                    f"排，各班情况：")
+            out = []
+            # 结论拆成几条独立事实，别写死成「成绩最好的是 X」当第一句——
+            # 用户问「哪个班最差」时，模型照抄这句会先报一个最好的人，答非所问。
+            # 只给一张表也不行，润色那一步会以为"还没查到具体人"，反问"请问是哪个班级"。
+            if rows:
+                best = max(rows, key=lambda x: (x[3] or 0))
+                worst_cls = rows[-1]
+                out.append(f"个人最高分：{best[2]}（{best[0]}）{best[3]} 分。")
+                out.append(f"班均最高：{rows[0][0]}（{rows[0][1]} 分）；"
+                           f"班均最低：{worst_cls[0]}（{worst_cls[1]} 分）。")
+            return (out + [head] +
+                    [f"- {c}（{n} 人）：班均 {avg} 分，第一 {name} {score} 分"
+                     for c, avg, name, score, n in rows] +
+                    ["回答方式：先直接回答用户问的那一项（谁成绩最好 / 哪个班最差 / 平均分多少），"
+                     "再按班列；不要只反问「请问是哪个班级」而不给结论，也不要把「个人最高分」"
+                     "当成每个问题的固定开头。"])
+
+        d = scores_mod.class_scores(engine, cls, course)
+        head = (f"{cls} 共 {d['总人数']} 人，按{d['筛选']['口径']}排："
+                f"班均 {d['班均']} 分，最高 {d['最高']}，最低 {d['最低']}。")
+        lines = [f"- 第 {x['名次']} 名 {x['姓名']}：{x['分数']} 分" for x in d["前几名"]]
+        out = [head, "前几名：\n" + "\n".join(lines)]
+        if d.get("末几名"):
+            out.append("需要盯的几位：\n" + "\n".join(
+                f"- 第 {x['名次']} 名 {x['姓名']}：{x['分数']} 分" for x in d["末几名"]))
+        if d.get("说明"):
+            out.append(d["说明"] + "。")
+        return out
+
+    def _compose_classroom(self, rep: dict, message: str) -> list[str]:
+        """教师端的课堂统计口径：单位是「我教的这门课」，不是一个学生、也不是一个行政班。
+
+        「我这门课平均分多少」如果落到班级排名，给出来的是各班学分加权均分（79.x），
+        与本课程期中卷面均分（77.3）不是一个口径——老师一眼就知道不对。
+        这里直接取 engine/classroom.py 的 report，与教师端页面完全同源，避免两处对不上。
+        """
+        courses = rep.get("courses") or []
+        if not courses:
+            return ["系统里没有查到你任教的课程。"]
+        # 问题里点了课名就用那门；老师通常只教一门，默认第一门
+        c = next((x for x in courses if x["name"] in message), courses[0])
+
+        low = next((d["count"] for d in c["dist"] if d["label"].startswith("60 分以下")), 0)
+        out = [
+            f"**{c['name']}**（修课 {c['students']} 人，以下均为本课程范围）："
+            f"期中卷面均分 {c['mid_avg']} 分，及格率 {c['pass_rate']}%（{low} 人不及格），"
+            f"中位 {c['median']}，最高 {c['highest']}，最低 {c['lowest']}，标准差 {c['std']}。",
+            "分数分布：" + "、".join(
+                f"{d['label']} {d['count']} 人（{d['pct']}%）" for d in c["dist"]) + "。",
+            f"出勤率 {c['attend']['rate']}%（缺课 {c['attend']['absent']} 人次、"
+            f"迟到 {c['attend']['late']} 人次），作业提交率 {c['hw']['rate']}%。",
+        ]
+        if c.get("classes"):
+            out.append("分班对比（与本课均分 %s 相比）：" % c["mid_avg"] + "、".join(
+                f"{x['class_name']} {x['mid_avg']}（{x['gap']:+.1f}）" for x in c["classes"]) + "。")
+        if c.get("grade_avg"):
+            out.append(f"本课均分比年级加权均分 {c['grade_avg']} 分"
+                       f"{'高' if c['gap_grade'] >= 0 else '低'} {abs(c['gap_grade'])} 分。")
+        if len(courses) > 1:
+            out.append("你任教的其他课程：" + "、".join(
+                f"{x['name']}（均分 {x['mid_avg']}，及格率 {x['pass_rate']}%）"
+                for x in courses if x["code"] != c["code"]) + "。")
+        return out
+
     def answer(self, role: str, sid: str | None, message: str, school: str | None = None,
                emit=None, profile: dict | None = None) -> dict:
         """生成回答。
@@ -528,6 +842,10 @@ class Agent:
         t0 = time.time()
         trace: list[dict] = []
         citations: list[dict] = []
+        risk_seen: dict = {}        # 本轮查到的那份风险评分，用来生成「数据依据」引用
+        roster_seen: dict = {}      # 本轮查到的名单，名单类回答也用得上
+        overview_seen: dict = {}    # 全校聚合
+        teacher_seen: dict = {}     # 课堂数据
         intent = self._intent(message)
         blocks: list[str] = []
         thoughts: list[str] = []
@@ -601,17 +919,102 @@ class Agent:
         def call(name, fn, **kwargs):
             start = time.time()
             result = fn(**kwargs)
+            ms = round((time.time() - start) * 1000, 1)
             item = {
                 "tool": name,
                 "args": {k: v for k, v in kwargs.items() if v is not None},
-                "ms": round((time.time() - start) * 1000, 1),
+                "ms": ms,
+                # 证据链：这张表 / 命中几条 / 查询时刻，随 trace 一起下发
+                "evidence": build_evidence(name, result, ms),
             }
             trace.append(item)
+            if name == "risk_score":
+                risk_seen["r"] = result      # 留给「数据依据」引用分组
+            elif name == "roster":
+                roster_seen["rows"] = result
+            elif name == "campus_overview":
+                overview_seen["o"] = result
+            elif name == "teacher_view":
+                teacher_seen["tv"] = result
             if emit:
                 emit("tool", item)
             return result
 
-        if role == "student" and sid:
+        # ---- 与角色无关的四类问题：课表 / 期末试算 / 待办 / 培养方案 ----
+        # 这四件事页面上都有数据，但改造前既没有工具也没有意图，五端问到都只能答
+        # 「系统里没有」——学生的「明天有没有课」就是这么答错的。
+        # 放在角色分支之前统一处理：五端问法一样，没必要各写一遍。
+        generic_done = False
+        if intent in ("timetable", "forecast", "todo", "plan",
+                      "appeal", "message", "class_report"):
+            from . import tools as tools_mod
+
+            tool_name = {"timetable": "get_timetable", "forecast": "get_final_forecast",
+                         "todo": "get_todos", "plan": "get_curriculum",
+                         "appeal": "get_appeals", "message": "get_messages",
+                         "class_report": "get_class_report"}[intent]
+            # 家校消息只有家长/辅导员/教务有通道，其他角色退回通知与待办
+            if intent == "message" and role not in ("parent", "counselor", "admin"):
+                intent = "todo"
+                tool_name = "get_todos"
+            t_args: dict = {}
+            # 把整句丢给工具，让它自己解析「明天 / 周三 / 第 8 周 / 下一节课」
+            if intent == "timetable":
+                t_args["when"] = message
+            if intent in ("timetable", "forecast", "plan") and target_sid:
+                t_args["name"] = self.engine.get(target_sid)["name"]
+
+            if intent in ("appeal", "message") and target_sid:
+                t_args["name"] = self.engine.get(target_sid)["name"]
+            if intent == "class_report":
+                cls = self._match_class(message)
+                if cls:
+                    t_args["class_name"] = cls
+            if intent == "forecast":
+                m = re.search(r"(?:拿|考|要到|目标)\s*(\d{2,3})\s*分", message)
+                if m:
+                    t_args["target"] = float(m.group(1))
+                for cname in self._course_names:
+                    if cname in message:
+                        t_args["course"] = cname
+                        break
+            t_name = (profile or {}).get("name") or ""
+            res = call(tool_name, lambda **_: tools_mod.run(
+                self, role, sid, tool_name, t_args, t_name, profile))
+            if role == "student":
+                who = "你"
+            elif role == "parent":
+                who = "孩子"
+            elif target_sid:
+                who = self.engine.get(target_sid)["name"] + " "
+            else:
+                who = ""
+            if intent == "timetable":
+                think("问的是课表，按日期 + 节次 + 教室取，和「我的课表」页面同一份数据。")
+                blocks.extend(self._compose_timetable(res, who))
+            elif intent == "forecast":
+                think("问的是期末要考多少，按考核权重正算，不是拿期中分硬估。")
+                blocks.extend(self._compose_forecast(res, who))
+            elif intent == "todo":
+                think("问的是通知与待办，按当前账号取。")
+                blocks.extend(self._compose_todo(res, who))
+            elif intent == "appeal":
+                think("问的是异议处理进度，去异议中心查。")
+                blocks.extend(self._compose_appeals(res, who))
+            elif intent == "message":
+                think("问的是家校消息，按会话查。")
+                blocks.extend(self._compose_messages(res, who))
+            elif intent == "class_report":
+                think("问的是班级整体情况，按班级现场聚合一份简报。")
+                blocks.extend(self._compose_class_report(res, who))
+            else:
+                think("问的是培养方案与学分要求。")
+                blocks.extend(self._compose_plan(res, who))
+            generic_done = True
+
+        if generic_done:
+            pass
+        elif role == "student" and sid:
             s = self.engine.get(sid)
             r = call("risk_score", self.t_risk, sid=sid)
             if intent == "export":
@@ -646,16 +1049,22 @@ class Agent:
                 blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
             if intent == "contact":
                 think("问的是任课老师，从课表里带出老师的档案与联系方式。")
-                blocks.extend(self._compose_contact(sid, message, who=""))
+                blocks.extend(call("contact_detail", self._compose_contact, sid=sid, message=message, who=""))
             if intent == "attendance":
                 think("问的是考勤明细，落到每一次异常记录。")
-                blocks.extend(self._compose_attendance(sid))
+                blocks.extend(call("attendance_detail", self._compose_attendance, sid=sid))
             if intent == "homework":
                 think("问的是作业明细，把未交和迟交的挑出来。")
-                blocks.extend(self._compose_homework(sid))
+                blocks.extend(call("homework_detail", self._compose_homework, sid=sid))
             if intent == "course":
                 think("问的是课表或学分，直接给在修课程清单。")
-                blocks.extend(self._compose_courses(sid))
+                blocks.extend(call("course_list", self._compose_courses, sid=sid))
+            if intent == "score":
+                think("问的是分数，按每门课的期中卷面 + 本课班均 + 班内排名给。")
+                if any(w in message for w in ["我们班", "班里", "同学", "全班", "谁成绩"]):
+                    blocks.append("（说明：学生账号只能看本人成绩，班里其他同学的名次不提供，"
+                                  "只能告诉你在本班排第几。）")
+                blocks.extend(call("score_detail", self._compose_scores, sid=sid))
             if not blocks:
                 # 没听懂的问题：先试知识库；检索不到就直说不会，绝不拿风险分充数
                 think("没匹配到已知问法，先去校规知识库试一次。")
@@ -689,15 +1098,18 @@ class Agent:
                 # 家长问孩子的课表、老师、作业、考勤：给明细，口吻用「孩子」
                 think(f"家长在问孩子的{ {'contact': '老师与联系方式', 'attendance': '考勤明细', 'homework': '作业明细', 'course': '课表学分'}[intent] }。")
                 if intent == "contact":
-                    blocks.extend(self._compose_contact(sid, message, who="孩子"))
+                    blocks.extend(call("contact_detail", self._compose_contact, sid=sid, message=message, who="孩子"))
                 elif intent == "attendance":
-                    blocks.extend(self._compose_attendance(sid, who="孩子"))
+                    blocks.extend(call("attendance_detail", self._compose_attendance, sid=sid, who="孩子"))
                 elif intent == "homework":
-                    blocks.extend(self._compose_homework(sid, who="孩子"))
+                    blocks.extend(call("homework_detail", self._compose_homework, sid=sid, who="孩子"))
                 else:
-                    blocks.extend(self._compose_courses(sid, who="孩子"))
-            if intent == "trend":
-                # 成绩走势已经答完了，不再叠一段政策，家长一次只吸收一件事
+                    blocks.extend(call("course_list", self._compose_courses, sid=sid, who="孩子"))
+            if intent == "score":
+                think("家长问孩子的分数，给每门课的期中分和班内位置。")
+                blocks.extend(call("score_detail", self._compose_scores, sid=sid, who="孩子"))
+            if intent in ("trend", "score"):
+                # 成绩走势/成绩单已经答完了，不再叠一段政策，家长一次只吸收一件事
                 pass
             elif intent == "advice":
                 think("家长在问能做什么，给在家能落地的配合方式。")
@@ -755,13 +1167,22 @@ class Agent:
             def _my_row(sid):
                 return next((st for st in my_students if st["id"] == sid), None)
 
+            # 「我教的学生里谁分最高」问的是分数，别被「我教」「学生」带进风险名单
+            if (intent == "roster" and
+                    any(w in message for w in ["成绩", "分数", "分最高", "最高分", "考得"]) and
+                    "风险" not in message):
+                intent = "score"
+            mine_scope = any(w in message for w in
+                             ["我这门课", "我的课", "我教", "这门课", "我的课堂", "我班的课"])
+            who_ask = any(w in message for w in ["谁", "哪个学生", "第一", "排名", "名单"])
+
             if intent == "course" or any(w in message for w in ["教的课", "教什么课", "几门课", "我教什么"]):
                 think("问的是自己教的课，给课程清单。")
                 cs = tv["courses"]
                 blocks.append(f"你本学期教 {len(cs)} 门课：")
                 blocks.append("\n".join(f"- **{c['name']}**（{c.get('credit','')} 学分·{c.get('kind','')}·{c.get('period','')}）" for c in cs))
                 blocks.append(f"修这些课的学生共 {len(my_students)} 人，要看名单就说「我课上的学生」。")
-            elif any(w in message for w in ["班均", "平均", "成绩"]) and not t_sid:
+            elif any(w in message for w in ["班均", "平均", "成绩"]) and not t_sid and intent != "score":
                 think("问的是班级成绩，给各课期中班均。")
                 for c in tv["courses"]:
                     scs = [st["courses"][0]["midterm"] for st in my_students
@@ -770,6 +1191,28 @@ class Agent:
                     if scs:
                         blocks.append(f"- **{c['name']}** 期中班均 {round(sum(scs) / len(scs), 1)}，最高 {max(scs)}，最低 {min(scs)}。")
                 blocks.append("想看某位学生的明细，说名字或「第 N 个」。")
+            elif intent == "score":
+                from . import classroom as classroom_mod
+                # 「我这门课平均分多少 / 及格率怎么样」是教师端特有的课堂口径：
+                # 均分 77.3、及格率 96.2% 只在本课程范围内成立。若落到行政班排名，
+                # 给出来的是各班班均 79.x，同一个问题两个答案，老师一眼就知道算错了。
+                if mine_scope and not who_ask:
+                    think("问的是我教的这门课的课堂统计，取本课程口径（均分/及格率/分布/分班）。")
+                    rep = call("classroom_stats", lambda **_: classroom_mod.report(
+                        self.engine, teacher_name, profile))
+                    blocks.extend(self._compose_classroom(rep, message))
+                else:
+                    # 老师问「谁成绩最好」：按期中卷面排，不再拿风险分名单搪塞
+                    think("问的是分数，按你任教的班级给出期中排名。")
+                    mine_classes = sorted({st["class_name"] for st in my_students})
+                    want_course = next((c["name"] for c in tv["courses"] if c["name"] in message), None)
+                    cls = self._match_class(message)
+                    if cls and cls not in mine_classes:
+                        blocks.append(f"{cls} 不在你任教的班里——你带的是 {'、'.join(mine_classes)}，"
+                                      f"跨班成绩要辅导员或教务账号才看得到。下面是你能看到的范围：")
+                        cls = None
+                    blocks.extend(call("class_score_detail", self._compose_class_scores,
+                                       cls=cls, course=want_course, who_limit=mine_classes))
             elif intent in ("roster", "overview") or any(w in message for w in ["课上", "我教", "我的学生", "谁"]):
                 think("问的是自己课上的学生，按风险分给名单。")
                 if not my_students:
@@ -972,6 +1415,25 @@ class Agent:
                         blocks.append("想看哪位的完整曲线，直接说名字或「第 N 个」。")
                     else:
                         blocks.append("当前没有名次明显后退的学生。")
+            elif intent == "score":
+                # 成绩类问题：点名了就给那位的单科成绩，点了班就给全班排名，
+                # 什么都没说就给各班横向对比。原来这一类没有分支，落到名单上按风险分排，
+                # 用户问「谁成绩最好」，拿回来的是「谁最危险」。
+                from . import scores as scores_mod
+                cls = self._match_class(message)
+                want_course = next((c["name"] for c in self.engine.students[0]["courses"]
+                                    if c["name"] in message), None)
+                if target_sid:
+                    s = self.engine.get(target_sid)
+                    think(f"问的是 {s['name']} 的分数，按每门课期中卷面给。")
+                    blocks.extend(call("score_detail", self._compose_scores, sid=target_sid))
+                    rank, total, base = scores_mod.class_rank(self.engine, s)
+                    blocks.append(f"放到班里横向看：{s['class_name']} 共 {total} 人，"
+                                  f"按学分加权期中均分排第 {rank} 名（班均 {base} 分）。")
+                else:
+                    think("没有点名，按成绩给班级排名。")
+                    blocks.extend(call("class_score_detail", self._compose_class_scores,
+                                       cls=cls, course=want_course))
             elif intent == "roster":
                 n = self._match_ordinal(message)
                 if n and last and last.get("roster"):
@@ -1083,11 +1545,68 @@ class Agent:
                 polished = llm.chat(messages, model=llm.route_model() or None)
             if polished:
                 reply = polished
+                model_name = llm.route_model() or llm._model()
                 item = {"tool": "llm_polish",
-                        "args": {"model": llm.route_model() or llm._model()}, "ms": 0}
+                        "args": {"model": model_name}, "ms": 0,
+                        "evidence": {"source": "大模型", "table": f"模型 {model_name}",
+                                     "rows": 1, "unit": "段回答",
+                                     "ts": time.strftime("%H:%M:%S"), "ms": 0,
+                                     "detail": "只做措辞，事实全部来自上面的工具"}}
                 trace.append(item)
                 if emit:
                     emit("tool", item)
+
+        # ---- 数据依据：回答里引用了风险分与因素，就把这张表也挂进引用分组 ----
+        # 校规条款能查到出处，分数以前只有结论没有来路；这里补上「六因素怎么加到 68.8」。
+        if risk_seen.get("r") and intent in ("why", "advice", "trend", "roster", "overview", "policy"):
+            rr = risk_seen["r"]
+            factors = "、".join(
+                f"{f['label']} {f.get('points', 0)}" for f in (rr.get("factors") or [])[:6]
+            )
+            data_cit = {
+                "kind": "data",
+                "citation": f"风险评分明细 · {rr.get('score')} 分（{rr.get('level_label')}）",
+                "source": "students 表 · risk_score() 六因素加权",
+                "text": f"六因素得分：{factors}。"
+                        + (f"硬性规则命中：{'；'.join(rr.get('overrides') or [])}。" if rr.get("overrides") else ""),
+            }
+            if not any(c.get("kind") == "data" for c in citations):
+                citations = list(citations) + [data_cit]
+        # 名单类回答一个数字都没引校规，但「谁排在前面」同样需要出处
+        elif roster_seen.get("rows") and intent in ("roster", "overview"):
+            rows = roster_seen["rows"]
+            head = "、".join(
+                f"{x.get('name', '')} {x.get('score', '')}" for x in rows[:5] if isinstance(x, dict)
+            )
+            if not any(c.get("kind") == "data" for c in citations):
+                citations = list(citations) + [{
+                    "kind": "data",
+                    "citation": f"风险名单 · 命中 {len(rows)} 名学生",
+                    "source": "students 表 · 按风险分降序",
+                    "text": f"按风险分排序取前 5 位：{head}。" + (f"其余 {len(rows) - 5} 人略。" if len(rows) > 5 else ""),
+                }]
+        # 全校统计与课堂数据同理：页面上那几个数字也要能点开看出处
+        elif overview_seen.get("o") and intent in ("overview", "roster"):
+            o = overview_seen["o"]
+            dist = o.get("dist") or {}
+            if not any(c.get("kind") == "data" for c in citations):
+                citations = list(citations) + [{
+                    "kind": "data",
+                    "citation": f"全校概览 · {o.get('total', '—')} 名在册学生",
+                    "source": "students 表 · 全校分布统计",
+                    "text": (f"红 {dist.get('red', 0)} 人、黄 {dist.get('yellow', 0)} 人、"
+                             f"绿 {dist.get('green', 0)} 人；风险上升 {o.get('rising_count', '—')} 人，"
+                             f"人均风险分 {o.get('avg_score', '—')}。数据更新于 {o.get('updated_at', '—')}。"),
+                }]
+        elif teacher_seen.get("tv") and not any(c.get("kind") == "data" for c in citations):
+            tv = teacher_seen["tv"]
+            citations = list(citations) + [{
+                "kind": "data",
+                "citation": f"课堂数据 · 任教 {len(tv.get('courses') or [])} 门课",
+                "source": "classroom · 考勤与作业明细",
+                "text": (f"{tv.get('teacher', '')} 名下 {len(tv.get('students') or [])} 名修课学生，"
+                         f"风险分与缺勤、未交作业次数逐人汇总。"),
+            }]
 
         # ---- 写记忆：这轮"在说谁"要记住，下一轮的"他/第N个"才能接上 ----
         roster_snapshot = None
@@ -1111,9 +1630,99 @@ class Agent:
             "citations": citations,
             "trace": trace,
             "thoughts": thoughts,
+            # 方案 C：这一轮如果落到「能替你做的一件事」，给一张待确认的卡片；
+            # 只在用户点头后才执行，AI 不自作主张。
+            "action": self._propose_action(role, intent, target_sid),
             "elapsed_ms": round((time.time() - t0) * 1000, 1),
             "suggestions": self._suggestions(role, intent, target_sid if role not in ("student", "parent") else sid),
         }
+
+    def _propose_action(self, role: str, intent: str, target_sid: str | None) -> dict | None:
+        """方案 C「对话即操作」：把下一步能替用户做的事摆成一张卡片。
+
+        三条纪律：
+        1. 只在答完「能落到动作」的问题时给，且一轮最多一张，不刷屏；
+        2. 按角色过滤——学生端永远拿不到发给家长的动作，越权入口一个都不留；
+        3. 只 propose 不执行：写台账、发信、发消息都要等用户点确认。
+        """
+        if not target_sid:
+            return None
+        try:
+            s = self.engine.get(target_sid)
+        except Exception:  # noqa: BLE001 - 学生不存在就别给卡片
+            return None
+        name = s.get("name") or ""
+        risk: dict = {}
+        try:
+            risk = self.engine.score(target_sid)
+        except Exception:  # noqa: BLE001
+            risk = {}
+        factors = risk.get("factors") or []
+        top = ""
+        if factors:
+            top = (max(factors, key=lambda f: f.get("points") or 0).get("label") or "")
+        level = risk.get("level") or ""
+
+        if role == "student":
+            # 学生只可能导出自己的文书；发给家长这类动作连入口都不给。
+            # export 类问题回答里已经带下载链接了，不再叠一张重复的卡。
+            if intent == "letter":
+                return actions_mod.propose(
+                    role, "export_letter", target_sid,
+                    label="导出我的学业告知函",
+                    payload={"sid": target_sid, "letter_type": "student"},
+                    hint="生成一份可以给家长看的 Word，内容和你看到的一致",
+                )
+            return None
+
+        if role == "parent":
+            if intent == "letter":
+                return actions_mod.propose(
+                    role, "export_letter", target_sid,
+                    label=f"导出 {name} 的家长告知函",
+                    payload={"sid": target_sid, "letter_type": "parent"},
+                )
+            return None
+
+        if role in ("counselor", "admin"):
+            if intent == "brief":
+                # 谈完最自然的下一步是归档，但归档是写操作：给卡片，不代劳
+                return actions_mod.propose(
+                    role, "record_intervention", target_sid,
+                    label=f"把这次谈话记进 {name} 的台账",
+                    payload={"sid": target_sid, "title": f"{name} 学业谈话",
+                             "note": "按谈话提纲沟通" + (f"（主因：{top}）" if top else ""),
+                             "status": "已完成"},
+                    hint="点确认才写入台账；执行后还能撤销",
+                )
+            if intent == "letter":
+                return actions_mod.propose(
+                    role, "export_letter", target_sid,
+                    label=f"导出 {name} 的家长告知函",
+                    payload={"sid": target_sid, "letter_type": "parent"},
+                )
+            if intent == "export":
+                # 回答里已经给了下载链接，不再摆一张重复的卡
+                return None
+            if intent in ("why", "advice", "trend"):
+                if level == "red":
+                    return actions_mod.propose(
+                        role, "send_letter", target_sid,
+                        label=f"给 {name} 的家长发学业预警告知函",
+                        payload={"sid": target_sid, "to": f"parent.{target_sid}@example.com"},
+                        hint="红色预警按校规应当书面告知家长；发送前请先核对内容",
+                    )
+                if role == "counselor" and top:
+                    txt = (f"您好，我是{name}的辅导员。这次同步一下{name}最近的情况："
+                           f"目前主要需要留意的是{top}，学校这边已经在跟进。"
+                           f"想和您约个时间聊一聊，看看家里能配合做点什么。")
+                    return actions_mod.propose(
+                        role, "message_parent", target_sid,
+                        label=f"给 {name} 的家长发一条沟通消息",
+                        payload={"sid": target_sid, "text": txt},
+                        hint="消息内容可以改；确认后才出现在家校沟通里",
+                    )
+        return None
 
     def _suggestions(self, role: str, intent: str = "", sid: str | None = None) -> list[str]:
         """建议词跟着上下文走：刚答完名单就引导点名，刚答完走势就引导落到行动。"""

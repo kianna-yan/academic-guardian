@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import time
 
-from . import llm, tools as tools_mod
+from . import evidence as evidence_mod, llm, tools as tools_mod
 from .memory import memory_key
 
 MAX_STEPS = 3          # 最多几轮工具调用，防止模型在工具里绕圈
@@ -29,15 +29,34 @@ _RULES = """
 
 你可以调用工具取数。规则是硬的，不是建议：
 
-1. 只要问题涉及**具体学生的成绩、考勤、作业、风险、课后自评与学习轨迹**，**名单**，**全校统计**，**学校制度条款**，
+1. 只要问题涉及**具体学生的成绩、考勤、作业、风险、课表、课后自评与学习轨迹**，**名单**，**全校统计**，**学校制度条款**，
    必须先调用工具。不许凭印象回答，不许"一般来说"。
+   - 分数 / 哪门课最好或最差 / 排第几 → `get_scores`（含每门课的期中卷面、本课班均、班内排名）
+   - 班上谁成绩最好 / 某班平均分 → `get_class_scores`（**不要**用 `get_roster`，那是按风险分排的，不是成绩）
+   - **哪天有课 / 明天有没有课 / 第几节在哪上 / 下节课是什么 → `get_timetable`**
+     （`get_courses` 只有课程与教师档案，**没有节次和教室**，拿它答上课时间一定会说"系统没有时间安排"）
+   - 老师联系方式 / 这学期修了哪些课 / 几门课 → `get_courses`
+   - 期末要考多少才不挂科 / 想拿 85 要考多少 → `get_final_forecast`（**不要**用 get_scores 硬算，
+     那个只有已经考出来的分）
+   - 我有什么待办 / 有没有新通知 → `get_todos`
+   - 告知函、家长信、通知书里写了什么 → `get_letter`（要文件才用导出）
+   - 毕业要修多少学分 / 培养方案 / 有哪些选修课 → `get_curriculum`
+   - 之前谈过几次 / 台账里有什么 / 上次谈了什么 → `get_interventions`
+   - 某个班这周整体怎么样 / 班情简报 → `get_class_report`
+   - 家校消息、辅导员有没有回 → `get_messages`（仅家长与辅导员端）
+   - 异议处理到哪一步了 / 还有谁没处理 → `get_appeals`
+   - 课后自评断点、哪节课没听懂 → `get_learning_track`
+   - 教师问「我这门课的班均 / 及格率 / 出勤率」→ `get_classroom`（**不要**用 get_class_scores，
+     那个是按学生排名的）
 2. **数字只能来自工具返回。** 不许自己计算、不许估算、不许把工具没给的数字补上。
    工具给 71.0 你就说 71.0，不许说"约 70 分"。
 3. 工具返回 ok=false 时，**如实说查不到**，把 note 里的候选名单或建议转述给用户，
    但**绝不把候选当成用户问的那个人**。例如「没找到张伟，最接近的是张玮（计科2403），是他吗？」
    **按姓名查不到时不要换别的工具再试同一个名字**——所有按姓名的工具查的是同一份学生库，
    换工具只会得到同样的结果，白等十几秒。直接问用户是哪一位。
-4. 工具结果里没有的字段，就是系统里没有这项数据，直说没有，不要编一个。
+4. **不要一句「系统里没有这项数据」就把问题打回去。** 先看工具清单里有没有别的工具能查这件事
+   （问成绩别用 get_courses、问班级成绩别用 get_roster），确实所有工具都给不出来，
+   才说"这项数据系统里没有"。
 5. 制度类问题回答时必须指明出自哪一条（工具会给出 citation）。
 6. 如果这个问题系统确实答不了（比如问食堂几点开门），直接说明这不在系统范围内，
    并说清你能查什么。不要硬凑答案。
@@ -90,7 +109,7 @@ def _history(agent, mkey: str | None) -> list[dict]:
 
 
 def _prefetch(agent, role: str, sid: str | None, message: str,
-              teacher_name: str) -> tuple[str, list[dict], list[str]]:
+              teacher_name: str, profile: dict | None = None) -> tuple[str, list[dict], list[str]]:
     """问题里点了名，就先把这名学生的数据取好放进提示词。
 
     为什么值得做：一次工具决策要等模型 5 秒左右，而"某某这学期怎么样"是最高频的问法。
@@ -113,12 +132,13 @@ def _prefetch(agent, role: str, sid: str | None, message: str,
     blocks: list[str] = []
     trace: list[dict] = []
     used: list[str] = []
-    for tool_name in ("get_student", "get_attendance", "get_homework"):
-        result = tools_mod.run(agent, role, sid, tool_name, {"name": hit}, teacher_name)
+    for tool_name in ("get_student", "get_scores", "get_attendance", "get_homework"):
+        result = tools_mod.run(agent, role, sid, tool_name, {"name": hit}, teacher_name, profile)
         if result.get("ok"):
             blocks.append(f"### {tool_name}\n{tools_mod.render(result)}")
             trace.append({"tool": tool_name, "args": {"name": hit}, "ms": 0.0,
-                          "ok": True, "prefetch": True})
+                          "ok": True, "prefetch": True,
+                          "evidence": evidence_mod.build(tool_name, result, 0.0)})
             used.append(tool_name)
         elif tool_name == "get_student":
             # 连学生都查不到，后面的考勤作业一定也是空的，直接收手
@@ -167,7 +187,7 @@ def route(agent, role: str, sid: str | None, message: str, school: str | None = 
     teacher_name = (profile or {}).get("name") or (profile or {}).get("teacher") or ""
 
     # 点名提问是最高频场景：先把这名学生的数据查好塞进去，省掉一轮模型往返（约 5 秒）
-    pre_text, pre_trace, pre_used = _prefetch(agent, role, sid, message, teacher_name)
+    pre_text, pre_trace, pre_used = _prefetch(agent, role, sid, message, teacher_name, profile)
     if pre_text:
         system += pre_text
         trace.extend(pre_trace)
@@ -254,23 +274,28 @@ def route(agent, role: str, sid: str | None, message: str, school: str | None = 
                 except json.JSONDecodeError:
                     args = {}
                 start = time.time()
-                result = tools_mod.run(agent, role, sid, name, args, teacher_name)
+                result = tools_mod.run(agent, role, sid, name, args, teacher_name, profile)
+                ms = round((time.time() - start) * 1000, 1)
                 item = {
                     "tool": name,
                     "args": dict(list(args.items())[:MAX_TOOL_ARGS_ECHO]),
-                    "ms": round((time.time() - start) * 1000, 1),
+                    "ms": ms,
                     "ok": bool(result.get("ok")),
+                    # 证据链：模型自己挑的工具同样要能追溯（表 / 行数 / 时刻）
+                    "evidence": evidence_mod.build(name, result, ms),
                 }
                 trace.append(item)
                 used_tools.append(name)
                 if emit:
                     emit("tool", item)
-                if name == "search_policy" and result.get("ok"):
+                if name in ("search_policy", "retrieve_policy") and result.get("ok"):
                     for hit in (result.get("data") or {}).get("条款") or []:
                         citations.append({
                             "citation": hit.get("出处"),
                             "text": hit.get("原文", ""),
                             "school": hit.get("学校"),
+                            "kind": "policy",
+                            "id": hit.get("id"),
                         })
                 msgs.append({
                     "role": "tool",
