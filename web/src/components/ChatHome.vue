@@ -115,8 +115,16 @@ const mediaError = ref("");
 const imageInput = ref<HTMLInputElement | null>(null);
 const videoInput = ref<HTMLInputElement | null>(null);
 
+/* 「+」里的附件菜单、以及「按住说话」的手势状态 */
+const menuOpen = ref(false);
+const holding = ref(false);
+const willCancel = ref(false);
+const draftEl = ref<HTMLTextAreaElement | null>(null);
+
 let rec: Recorder | null = null;
 let recTimer: number | null = null;
+let pressAt = 0;
+let pressY = 0;
 
 const MEDIA_ICON: Record<string, string> = { image: "🖼", video: "🎬", audio: "🎤" };
 const MAX_ATTACH = 3;
@@ -180,31 +188,98 @@ async function onVideoPicked(ev: Event) {
   }
 }
 
-async function toggleRec() {
-  if (recording.value) {
-    await stopRec();
-    return;
-  }
-  try {
-    rec = await startRecording();
-    recording.value = true;
-    recSeconds.value = 0;
-    recTimer = window.setInterval(() => {
-      recSeconds.value += 1;
-      if (recSeconds.value >= 60) void stopRec(); // 一分钟自动收，别录成会议纪要
-    }, 1000);
-    if (!rec.canTranscribe) note("这个浏览器不支持实时转写，录完交给后端识别");
-  } catch (e: any) {
-    note(e?.message || "打不开麦克风，检查一下浏览器权限");
-  }
+/**
+ * 语音按微信那套「按住说话」来做：
+ * 按下开录 → 松开就结束并转写；按下后往上滑 60px 松开 = 取消；点一下（<0.5s）
+ * 当成误触，直接丢掉这段，免得用户以为自己说完了却什么也没发出去。
+ */
+function tickRec() {
+  recTimer = window.setInterval(() => {
+    recSeconds.value += 1;
+    if (recSeconds.value >= 60) void stopRec(); // 一分钟自动收，别录成会议纪要
+  }, 1000);
 }
 
-async function stopRec() {
+function clearTimer() {
   if (recTimer) {
     window.clearInterval(recTimer);
     recTimer = null;
   }
+}
+
+function detachHold() {
+  window.removeEventListener("pointermove", onHoldMove);
+  window.removeEventListener("pointerup", endHold);
+  window.removeEventListener("pointercancel", endHold);
+}
+
+function onHoldMove(ev: PointerEvent) {
+  if (!holding.value) return;
+  // 手指往上抬超过 60px 就切到「松开取消」，跟微信一致
+  willCancel.value = pressY - ev.clientY > 60;
+}
+
+async function beginHold(ev: PointerEvent) {
+  if (chat.streaming || busy.value || recording.value || holding.value) return;
+  menuOpen.value = false;
+  pressAt = Date.now();
+  pressY = ev.clientY;
+  holding.value = true;
+  willCancel.value = false;
+  window.addEventListener("pointermove", onHoldMove);
+  window.addEventListener("pointerup", endHold);
+  window.addEventListener("pointercancel", endHold);
+  try {
+    rec = await startRecording();
+    if (!holding.value) {
+      // 麦克风还没开好用户就松手了，这段作废
+      rec.cancel();
+      rec = null;
+      return;
+    }
+    recording.value = true;
+    recSeconds.value = 0;
+    tickRec();
+    if (!rec.canTranscribe) note("这个浏览器不支持实时转写，录完交给后端识别");
+  } catch (e: any) {
+    detachHold();
+    holding.value = false;
+    note(e?.message || "打不开麦克风，检查一下浏览器权限");
+  }
+}
+
+function endHold() {
+  const wasHolding = holding.value;
+  detachHold();
+  if (!wasHolding) return;
+  holding.value = false;
+  if (!recording.value) return; // 还在等麦克风，beginHold 那边会自己收尾
+  if (willCancel.value) {
+    void cancelRec("已取消");
+    return;
+  }
+  if (Date.now() - pressAt < 500) {
+    void cancelRec("按住麦克风说话，说完再松开");
+    return;
+  }
+  void stopRec();
+}
+
+async function cancelRec(hint: string) {
+  clearTimer();
   recording.value = false;
+  willCancel.value = false;
+  recSeconds.value = 0;
+  const handle = rec;
+  rec = null;
+  handle?.cancel();
+  note(hint);
+}
+
+async function stopRec() {
+  clearTimer();
+  recording.value = false;
+  willCancel.value = false;
   const handle = rec;
   rec = null;
   if (!handle) return;
@@ -233,15 +308,15 @@ async function stopRec() {
 
 /** 附件被删/被发送后，把还在录的音收掉，避免麦克风一直开着 */
 function cleanupRec() {
-  if (recTimer) {
-    window.clearInterval(recTimer);
-    recTimer = null;
-  }
+  clearTimer();
+  detachHold();
   if (rec) {
     rec.cancel();
     rec = null;
   }
   recording.value = false;
+  holding.value = false;
+  willCancel.value = false;
 }
 
 function send(text: string) {
@@ -260,13 +335,45 @@ function submit() {
   send(draft.value);
 }
 
+/** 输入框随内容长高，最多 120px 后内部滚动 */
+function autoGrow() {
+  const el = draftEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(120, el.scrollHeight)}px`;
+}
+watch(draft, () => nextTick(autoGrow));
+watch(
+  () => chat.streaming,
+  () => nextTick(autoGrow),
+);
+
+/** 回车发送、Shift+回车换行 */
+function onKeydown(ev: KeyboardEvent) {
+  if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing) return;
+  ev.preventDefault();
+  submit();
+}
+
 function openImage() {
+  menuOpen.value = false;
   imageInput.value?.click();
 }
 
 function openVideo() {
+  menuOpen.value = false;
   videoInput.value?.click();
 }
+
+/** 点「+」外面就收起菜单；Esc 同样 */
+function onDocClick() {
+  menuOpen.value = false;
+}
+watch(menuOpen, (v) => {
+  if (v) document.addEventListener("click", onDocClick);
+  else document.removeEventListener("click", onDocClick);
+});
+onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
 
 // 意图是一个内部枚举值，直接贴 "unknown" 给用户看没意义。
 // 这里翻成人话：用户想知道的是「系统怎么理解我这句话的、去哪找的答案」。
@@ -357,74 +464,176 @@ function intentLabel(v: string): string {
           <button v-for="s in suggestList" :key="s" class="chip" @click="send(s)">{{ s }}</button>
         </div>
 
-        <!-- 待发送的附件：发之前就能确认带对没带对 -->
-        <div v-if="attachments.length" class="ch-attach">
-          <div v-for="a in attachments" :key="a.id" class="ch-attach-item">
-            <img v-if="a.thumb" :src="a.thumb" :alt="a.name" />
-            <span v-else class="ch-attach-ico">{{ MEDIA_ICON[a.kind] }}</span>
-            <div class="ch-attach-meta">
-              <span class="nm">{{ a.name }}</span>
-              <span class="sz">
-                {{ a.kind === "video" ? `抽了 ${a.frames?.length || 0} 帧` : a.duration ? `${a.duration} 秒` : humanSize(a.size) }}
-              </span>
-            </div>
-            <button type="button" class="ch-attach-x" title="移除" @click="removeAttach(a.id)">×</button>
-          </div>
-        </div>
-
-        <!-- 录音中：实时告诉用户在录，且能一键收 -->
-        <div v-if="recording" class="ch-rec">
-          <span class="ch-rec-dot"></span>
-          <span class="ch-rec-txt">正在听…{{ recSeconds }}s</span>
-          <span class="ch-rec-hint">说完点「停」，也可以直接点发送</span>
-          <button type="button" class="ch-rec-stop" @click="stopRec">停</button>
-        </div>
-
         <div v-if="mediaError" class="ch-media-err">{{ mediaError }}</div>
 
-        <form class="ch-draft" @submit.prevent="submit">
-          <button
-            type="button"
-            class="ch-tool"
-            :disabled="chat.streaming || busy || recording"
-            title="发一张图（支持成绩单、板书、截图）"
-            @click="openImage"
-          >
-            🖼
-          </button>
-          <button
-            type="button"
-            class="ch-tool"
-            :disabled="chat.streaming || busy || recording"
-            title="发一段视频（本地抽帧识别，不上传整段）"
-            @click="openVideo"
-          >
-            🎬
-          </button>
-          <button
-            type="button"
-            class="ch-tool"
-            :class="{ on: recording }"
-            :disabled="chat.streaming || busy"
-            title="按住说话：说完自动转成文字"
-            @click="toggleRec"
-          >
-            🎤
-          </button>
-          <input
+        <form class="ch-composer" @submit.prevent="submit">
+          <!-- 待发送的附件：就贴在输入区里，发之前能确认带对没带对 -->
+          <div v-if="attachments.length" class="ch-attach">
+            <div v-for="a in attachments" :key="a.id" class="ch-attach-item">
+              <img v-if="a.thumb" :src="a.thumb" :alt="a.name" />
+              <span v-else class="ch-attach-ico">{{ MEDIA_ICON[a.kind] }}</span>
+              <div class="ch-attach-meta">
+                <span class="nm">{{ a.name }}</span>
+                <span class="sz">
+                  {{ a.kind === "video" ? `抽了 ${a.frames?.length || 0} 帧` : a.duration ? `${a.duration} 秒` : humanSize(a.size) }}
+                </span>
+              </div>
+              <button type="button" class="ch-attach-x" title="移除" @click="removeAttach(a.id)">
+                ×
+              </button>
+            </div>
+          </div>
+
+          <!-- 录音中：整条输入区变成微信那样的「松开发送 / 上滑取消」 -->
+          <div v-if="recording" class="ch-voice" :class="{ 'will-cancel': willCancel }">
+            <span class="ch-voice-wave"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="ch-voice-txt">
+              {{ willCancel ? "松开手指，取消发送" : `正在听… ${recSeconds}″` }}
+            </span>
+            <button type="button" class="ch-voice-stop" @click.stop="stopRec">结束</button>
+          </div>
+          <textarea
+            v-else
+            ref="draftEl"
             v-model="draft"
-            :placeholder="recording ? '正在听你说…' : placeholder"
+            rows="1"
+            :placeholder="placeholder"
             :disabled="chat.streaming"
-            autocomplete="off"
             data-test="chat-input"
-          />
-          <button
-            type="submit"
-            :disabled="chat.streaming || (!draft.trim() && !attachments.length)"
-            data-test="chat-send"
-          >
-            {{ chat.streaming ? "…" : "发送" }}
-          </button>
+            @keydown="onKeydown"
+          ></textarea>
+
+          <div class="ch-bar">
+            <div class="ch-plus-wrap">
+              <button
+                type="button"
+                class="ch-plus"
+                :class="{ on: menuOpen }"
+                :disabled="chat.streaming || busy || recording"
+                title="添加图片或视频"
+                aria-label="添加图片或视频"
+                @click.stop="menuOpen = !menuOpen"
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                  <path
+                    d="M12 5v14M5 12h14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+
+              <transition name="ch-pop">
+                <div v-if="menuOpen" class="ch-menu" @click.stop>
+                  <button type="button" @click="openImage">
+                    <span class="ic">
+                      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                        <rect
+                          x="3"
+                          y="5"
+                          width="18"
+                          height="14"
+                          rx="2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                        />
+                        <circle cx="8.6" cy="10.2" r="1.5" fill="currentColor" />
+                        <path
+                          d="M4.5 17l4.6-4.2 3.4 2.9 2.9-2.4 3.9 3.7"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="tx"><b>照片</b><i>成绩单、板书、聊天截图</i></span>
+                  </button>
+                  <button type="button" @click="openVideo">
+                    <span class="ic">
+                      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                        <rect
+                          x="3"
+                          y="6"
+                          width="12.5"
+                          height="12"
+                          rx="2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                        />
+                        <path
+                          d="M15.5 11.2l4.3-2.5c.5-.3 1.2.05 1.2.65v5.3c0 .6-.7.95-1.2.65l-4.3-2.5z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="tx"><b>视频</b><i>本地抽 4 帧，不上传整段</i></span>
+                  </button>
+                </div>
+              </transition>
+            </div>
+
+            <span class="ch-tip">图片 · 视频 · 按住说话</span>
+
+            <button
+              type="button"
+              class="ch-mic"
+              :class="{ on: holding || recording }"
+              :disabled="chat.streaming || busy"
+              title="按住说话，松开结束；上滑可取消"
+              aria-label="按住说话"
+              @pointerdown.prevent="beginHold"
+              @contextmenu.prevent
+            >
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                <rect
+                  x="9"
+                  y="2.8"
+                  width="6"
+                  height="10.4"
+                  rx="3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                />
+                <path
+                  d="M5.2 11.2a6.8 6.8 0 0 0 13.6 0M12 18.2V21"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+
+            <button
+              type="submit"
+              class="ch-send"
+              :disabled="chat.streaming || recording || (!draft.trim() && !attachments.length)"
+              data-test="chat-send"
+              :title="chat.streaming ? '正在回答…' : '发送'"
+              aria-label="发送"
+            >
+              <svg v-if="!chat.streaming" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M12 19.5V5M5.5 11.5L12 5l6.5 6.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span v-else class="ch-send-dots">…</span>
+            </button>
+          </div>
         </form>
 
         <input
@@ -461,41 +670,6 @@ function intentLabel(v: string): string {
 /* ---------------- 多模态输入 ---------------- */
 .ch-file {
   display: none;
-}
-
-/* 三个模态按钮：方形、浅色，别跟「发送」抢注意力 */
-.ch-draft .ch-tool {
-  flex: 0 0 auto;
-  width: 42px;
-  padding: 0;
-  font-size: 17px;
-  line-height: 1;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: #fffdf8;
-  color: #a58c72;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.15s;
-}
-.ch-draft .ch-tool:hover:not(:disabled) {
-  background: #fdf6ea;
-  border-color: #e3b980;
-  transform: translateY(-1px);
-}
-.ch-draft .ch-tool:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
-}
-.ch-draft .ch-tool.on {
-  background: #fee2e2;
-  border-color: #f0a8a8;
-  color: #b91c1c;
-  animation: recPulse 1.3s ease-in-out infinite;
-}
-@keyframes recPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.28); }
-  50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0); }
 }
 
 /* 待发送的附件条 */
@@ -567,48 +741,6 @@ function intentLabel(v: string): string {
   background: #e8d5bd;
 }
 
-/* 录音状态条 */
-.ch-rec {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 7px 10px;
-  border-radius: 10px;
-  background: #fef2f2;
-  border: 1px solid #f6cfcf;
-  font-size: 12px;
-  color: #b91c1c;
-}
-.ch-rec-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #dc2626;
-  animation: recBlink 1s ease-in-out infinite;
-}
-@keyframes recBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-.ch-rec-txt {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-}
-.ch-rec-hint {
-  color: #c08a8a;
-  font-size: 11px;
-}
-.ch-rec-stop {
-  margin-left: auto;
-  border: 1px solid #f0a8a8;
-  background: #fff;
-  color: #b91c1c;
-  border-radius: 8px;
-  font-size: 11.5px;
-  padding: 3px 12px;
-  cursor: pointer;
-}
 .ch-media-err {
   margin-bottom: 8px;
   font-size: 11.5px;

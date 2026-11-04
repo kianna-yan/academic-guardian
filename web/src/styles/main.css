@@ -865,40 +865,270 @@ a {
 .chat-home-foot .chat-col {
   gap: 8px;
 }
-.ch-draft {
+/* ---------- 对话输入区：一个圆角卡片，左下「+」，右下「麦克风 + 发送」 ----------
+   参考常见聊天端的排法：输入区只留两个入口，附件（照片 / 视频）收进「+」里，
+   语音做成「按住说话」，不再让三个大按钮并排抢注意力。 */
+.ch-composer {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: #fffdf8;
+  padding: 7px 9px 6px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ch-composer:focus-within {
+  border-color: #e3b980;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.09);
+}
+.ch-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  max-height: 120px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text);
+  padding: 3px 5px 5px;
+  overflow-y: auto;
+}
+.ch-composer textarea::placeholder {
+  color: #b3a08a;
+}
+.ch-bar {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
-.ch-draft input {
-  flex: 1;
-  height: 42px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  padding: 0 14px;
-  font-size: 13.5px;
-  font-family: inherit;
-  min-width: 0;
-}
-.ch-draft input:focus {
-  outline: 2px solid rgba(217, 119, 6, 0.25);
-  border-color: #e3b980;
-}
-.ch-draft button {
-  height: 42px;
-  padding: 0 22px;
-  border-radius: 10px;
-  border: 0;
-  background: var(--brand);
-  color: #fff;
-  font-size: 13.5px;
-  font-weight: 500;
+.ch-plus-wrap {
+  position: relative;
   flex: 0 0 auto;
-  cursor: pointer;
 }
-.ch-draft button:disabled {
-  opacity: 0.55;
+/* 「+」：圆形描边，收起状态安静，展开时点亮 */
+.ch-plus {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: #fff;
+  color: #8a7357;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.18s;
+}
+.ch-plus:hover:not(:disabled) {
+  background: var(--brand-soft);
+  border-color: #e3b980;
+  color: var(--brand);
+}
+.ch-plus.on {
+  background: var(--brand-soft);
+  border-color: #e3b980;
+  color: var(--brand);
+  transform: rotate(45deg);
+}
+.ch-plus:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
+/* 「+」弹出的附件菜单：浮在输入框上方 */
+.ch-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: 214px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(59, 46, 36, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ch-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+.ch-menu button:hover {
+  background: #fdf6ea;
+}
+.ch-menu .ic {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.ch-menu .tx {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+  min-width: 0;
+}
+.ch-menu .tx b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ch-menu .tx i {
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--muted);
+}
+.ch-pop-enter-active,
+.ch-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.ch-pop-enter-from,
+.ch-pop-leave-to {
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+}
+
+.ch-tip {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: #c0ad97;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 2px;
+}
+/* 麦克风：按住说话 */
+.ch-mic {
+  flex: 0 0 auto;
+  /* 提示字在小屏会被隐藏，靠这个 auto 把两个圆钮顶到右边 */
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a7357;
+  touch-action: none;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.ch-mic:hover:not(:disabled) {
+  background: #f6efe2;
+  color: var(--brand);
+}
+.ch-mic.on {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.ch-mic:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* 发送：圆形实心，跟「+」「麦克风」同一行右端 */
+.ch-send {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d97706, #e8923f);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.3);
+  transition: filter 0.15s, opacity 0.15s, transform 0.12s;
+}
+.ch-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.ch-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.ch-send:disabled {
+  background: #e8ddcd;
+  color: #a89073;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.ch-send-dots {
+  font-size: 14px;
+  line-height: 1;
+  margin-top: -4px;
+}
+
+/* 录音态：输入框整条换成「松开发送」提示 */
+.ch-voice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 3px 5px 5px;
+  border-radius: 10px;
+  background: #fef6f6;
+  color: #b91c1c;
+}
+.ch-voice.will-cancel {
+  background: #fee2e2;
+}
+.ch-voice-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.ch-voice-wave i {
+  width: 2.5px;
+  height: 5px;
+  border-radius: 2px;
+  background: #dc2626;
+  animation: voiceWave 0.9s ease-in-out infinite;
+}
+.ch-voice-wave i:nth-child(2) { animation-delay: 0.12s; }
+.ch-voice-wave i:nth-child(3) { animation-delay: 0.24s; }
+.ch-voice-wave i:nth-child(4) { animation-delay: 0.36s; }
+.ch-voice-wave i:nth-child(5) { animation-delay: 0.48s; }
+@keyframes voiceWave {
+  0%, 100% { height: 4px; opacity: 0.55; }
+  50% { height: 15px; opacity: 1; }
+}
+.ch-voice-txt {
+  flex: 1;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-voice-stop {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid #f0a8a8;
+  border-radius: 999px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 11.5px;
+}
+
 .chat-stream .msg .bubble {
   max-width: 92%;
 }
@@ -1277,12 +1507,17 @@ a {
   .chat-home-foot {
     padding: 8px 12px 12px;
   }
-  .ch-draft input {
-    height: 40px;
+  .ch-composer {
+    padding: 6px 8px 5px;
   }
-  .ch-draft button {
-    height: 40px;
-    padding: 0 16px;
+  /* 小屏让输入框吃掉提示字的位置，两个圆钮仍然够点 */
+  .ch-tip {
+    display: none;
+  }
+  .ch-plus,
+  .ch-mic {
+    width: 32px;
+    height: 32px;
   }
   .dash-nav {
     padding: 8px 11px;
