@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { chatStream, api } from "@/api/client";
+import { chatStream, api, type MediaPayload } from "@/api/client";
+import type { PickedMedia } from "@/composables/media";
 import type { ChatTrace, Citation, Role } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 
@@ -12,10 +13,21 @@ export interface ChatMessage {
   citations: Citation[];
   /** 思考链：实时推过来的推理过程，pending 时也在长 */
   thoughts: string[];
+  /** 这条消息带的图片 / 视频 / 语音（只留缩略图与转写，不存原始 base64） */
+  media?: ChatMedia[];
   intent?: string;
   elapsed?: number;
   pending?: boolean;
   error?: string;
+}
+
+/** 气泡里回显附件用的轻量结构：大块 base64 不进 localStorage */
+export interface ChatMedia {
+  kind: "image" | "video" | "audio";
+  name: string;
+  thumb?: string;
+  duration?: number;
+  transcript?: string;
 }
 
 const GREETING: Record<Role, string> = {
@@ -165,13 +177,32 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  async function send(role: Role, sid: string | null, text: string) {
+  async function send(role: Role, sid: string | null, text: string, attachments: PickedMedia[] = []) {
     const content = text.trim();
-    if (!content || streaming.value) return;
+    const media = attachments.filter(Boolean);
+    if (!content && !media.length) return;
+    if (streaming.value) return;
     ensure(role);
     const account = auth.profile?.account || "anon";
 
-    messages.value.push({ id: nextId(), from: "user", text: content, trace: [], citations: [], thoughts: [] });
+    // 气泡里只回显缩略图与转写文字，原始 base64 留在本次请求里，不进会话存档
+    const echo: ChatMedia[] = media.map((m) => ({
+      kind: m.kind,
+      name: m.name,
+      thumb: m.thumb,
+      duration: m.duration,
+      transcript: m.transcript,
+    }));
+
+    messages.value.push({
+      id: nextId(),
+      from: "user",
+      text: content,
+      trace: [],
+      citations: [],
+      thoughts: [],
+      media: echo.length ? echo : undefined,
+    });
     messages.value.push({
       id: nextId(),
       from: "assistant",
@@ -187,8 +218,25 @@ export const useChatStore = defineStore("chat", () => {
     streaming.value = true;
     inflight = new AbortController();
 
+    const payload: MediaPayload[] = media.map((m) => ({
+      kind: m.kind,
+      name: m.name,
+      mime: m.mime,
+      data: m.data,
+      frames: m.frames,
+      duration: m.duration,
+      transcript: m.transcript,
+    }));
+
     try {
-      await chatStream({ role, sid, message: content }, (ev) => {
+      await chatStream(
+        {
+          role,
+          sid,
+          message: content || (media.length ? "看看我发的这个" : ""),
+          attachments: payload.length ? payload : undefined,
+        },
+        (ev) => {
         switch (ev.type) {
           case "meta":
             reply.intent = ev.intent;

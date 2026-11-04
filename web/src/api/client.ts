@@ -149,6 +149,11 @@ async function post<T>(url: string, body?: unknown, config?: AxiosRequestConfig)
 export const api = {
   login: (body: { role: Role; account: string; password: string }) =>
     post<LoginResult>("/auth/login", body),
+  /** 语音转写：录音先转成文字，用户能改完再发 */
+  asr: (body: MediaPayload) => post<{ ok: boolean; text?: string; note?: string }>("/asr", body),
+  /** 多模态能力自检：视觉模型、语音模型是否就绪 */
+  mediaHealth: () =>
+    get<{ enabled: boolean; vision_model: string; asr_model: string }>("/media/health"),
   me: () =>
     get<{
       profile: AuthProfile;
@@ -314,8 +319,18 @@ export type StreamEvent =
   | { type: "done"; elapsed_ms: number }
   | { type: "error"; message: string };
 
+export interface MediaPayload {
+  kind: "image" | "video" | "audio" | "text";
+  name?: string;
+  mime?: string;
+  data?: string;
+  frames?: string[];
+  duration?: number;
+  transcript?: string;
+}
+
 export async function chatStream(
-  body: { role: string; sid: string | null; message: string },
+  body: { role: string; sid: string | null; message: string; attachments?: MediaPayload[] },
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

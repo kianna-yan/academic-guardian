@@ -832,12 +832,16 @@ class Agent:
         return out
 
     def answer(self, role: str, sid: str | None, message: str, school: str | None = None,
-               emit=None, profile: dict | None = None) -> dict:
+               emit=None, profile: dict | None = None,
+               attachments: list[dict] | None = None) -> dict:
         """生成回答。
 
         emit: 可选回调 emit(kind, payload)，用于把中间过程推给流式接口。
               kind 取值 meta / thought / tool / delta；不传则行为与原来完全一致。
         profile: 登录身份，用来定位会话记忆；不给则不开多轮能力。
+        attachments: 本轮附带的图片 / 语音 / 视频。识别结果作为「用户说了什么」
+              拼在提问前面走同一条链路；材料里出现的分数与姓名不作学情数据，
+              真实数字仍然只能来自工具查询。
         """
         t0 = time.time()
         trace: list[dict] = []
@@ -846,16 +850,39 @@ class Agent:
         roster_seen: dict = {}      # 本轮查到的名单，名单类回答也用得上
         overview_seen: dict = {}    # 全校聚合
         teacher_seen: dict = {}     # 课堂数据
-        intent = self._intent(message)
         blocks: list[str] = []
         thoughts: list[str] = []
         # 本轮对话里实际列过的名单（供下一轮"第 N 个"指代）
         listed: list[dict] | None = None
+        # 用户亲手打的字：记忆里存这个，不存识别出来的长段材料描述
+        raw_message = (message or "").strip()
 
         def think(text: str) -> None:
             thoughts.append(text)
             if emit:
                 emit("thought", {"text": text})
+
+        # ---- 多模态：先把附件认出来，再当成"用户说的话"接进同一条链路 ----
+        if attachments:
+            from . import multimodal
+
+            kinds = {str((a or {}).get("kind") or "") for a in attachments}
+            label = "、".join(
+                {"image": "图片", "audio": "语音", "video": "视频", "text": "文本"}.get(k, "附件")
+                for k in sorted(kinds) if k
+            ) or "附件"
+            think(f"用户带了{label}，先看清内容再判断该查什么。")
+            media_block, media_trace, media_problems = multimodal.as_text_block(attachments)
+            for item in media_trace:
+                trace.append(item)
+                if emit:
+                    emit("tool", item)
+            if media_block:
+                message = (media_block + "\n\n" + raw_message).strip()
+            if media_problems:
+                self._last_media_problems = media_problems
+
+        intent = self._intent(message)
 
         if emit:
             emit("meta", {"intent": intent})
@@ -880,15 +907,18 @@ class Agent:
                 last = hist[-1]
 
         target_sid = sid
+        # 人名消解只看用户亲手打的字：上传的成绩单、名单截图上印着的名字
+        # 是材料内容，不是「要查谁」，拿它去匹配会查错人。
+        name_src = raw_message or ""
         if role in ("counselor", "admin"):
-            target_sid, thought = self.resolve_target(message, role, sid, last)
+            target_sid, thought = self.resolve_target(name_src, role, sid, last)
             if thought:
                 think(thought)
         elif role in ("student", "parent") and target_sid:
             # 学生/家长只能看本人，但系统之前是「静默换成自己」——问别人的名字，
             # 拿回来的是自己的数据，用户以为查到的是对方。这里必须先说清楚。
             me = self.engine.get(target_sid)["name"]
-            others = [n for n in self._names if n in message and n != me]
+            others = [n for n in self._names if n in name_src and n != me]
             if others:
                 think(f"问的是 {others[0]}，但当前账号只能看 {me} 本人，按权限只答本人。")
                 who = "孩子" if role == "parent" else "本人"
@@ -900,7 +930,7 @@ class Agent:
             # 否则用户会以为这就是他要的那个班。
             mine = {s["class_name"] for s in self.engine.students
                     if any(c.get("teacher") == profile["name"] for c in s.get("courses") or [])}
-            asked = [c for c in self._classes if c in message]
+            asked = [c for c in self._classes if c in name_src]
             outside = [c for c in asked if c not in mine]
             if outside:
                 think(f"问的 {outside[0]} 不在 {profile['name']} 任教的班里，先说清范围。")
@@ -908,7 +938,7 @@ class Agent:
                     f"（说明：**{outside[0]}** 不在你任教的班里——你带的是 "
                     f"{'、'.join(sorted(mine))}，跨班数据要辅导员或教务账号才看得到。"
                     f"下面是你自己课上的情况。）")
-            elif "软件工程" in message or "大三" in message:
+            elif "软件工程" in name_src or "大三" in name_src:
                 # 「大三软件工程班」这类说法对不上库里的班级名，别硬套到自己课上
                 think("问的班级在教务系统里找不到对应，说明范围后按自己的课回答。")
                 blocks.append(
@@ -1617,7 +1647,7 @@ class Agent:
             ]
         if mkey and self.memory:
             self.memory.append(mkey, {
-                "message": message[:200],
+                "message": (raw_message or message)[:200],
                 "reply": reply[:400],
                 "sid": target_sid if role not in ("student", "parent") else sid,
                 "intent": intent,

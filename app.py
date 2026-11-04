@@ -268,10 +268,28 @@ async def auth_guard(request: Request, call_next):
     return await call_next(request)
 
 
+class MediaIn(BaseModel):
+    """一条多模态附件。
+
+    kind: image / video / audio / text
+    data: dataURL 或裸 base64（图片、音频）
+    frames: 视频抽出来的帧（dataURL 数组），抽取在前端做，后端不解码视频
+    transcript: 浏览器已转写出的文字，后端 ASR 不可用时用它兜底
+    """
+    kind: str
+    name: str | None = None
+    mime: str | None = None
+    data: str | None = None
+    frames: list[str] | None = None
+    duration: float | None = None
+    transcript: str | None = None
+
+
 class ChatIn(BaseModel):
     role: str = "student"
     sid: str | None = None
-    message: str
+    message: str = ""
+    attachments: list[MediaIn] | None = None
 
 
 class ConfigIn(BaseModel):
@@ -692,12 +710,52 @@ def policy(q: str, school: str | None = None):
     return {"query": q, "hits": hits}
 
 
+def _media(body: ChatIn) -> list[dict] | None:
+    """把 pydantic 附件翻成普通 dict，顺手挡掉过大的数据。"""
+    if not body.attachments:
+        return None
+    out: list[dict] = []
+    for a in body.attachments:
+        d = a.model_dump()
+        # 单条 base64 超过 16MB 直接丢内容，避免把进程内存打爆
+        if d.get("data") and len(d["data"]) > 16 * 1024 * 1024:
+            d["data"] = None
+        out.append(d)
+    return out
+
+
 @app.post("/api/chat")
 def chat(body: ChatIn, request: Request):
     role, sid = _scope(request.state.profile, body)
     agent = _make_agent()
     return agent.answer(role, sid, body.message, CONFIG.get("school"),
-                        profile=request.state.profile)
+                        profile=request.state.profile,
+                        attachments=_media(body))
+
+
+@app.post("/api/asr")
+def asr_upload(body: MediaIn, request: Request):
+    """语音转写：录音传上来，返回文字。
+
+    进对话前先转一遍，用户能在输入框里看到自己说了什么、改一改再发。
+    glm-asr 需要单独的语音资源包，额度不足时 ok=false，前端会自动降级到
+    浏览器自带的语音识别；两条都不通就如实告诉用户没听清。
+    """
+    from engine import multimodal
+
+    if (body.kind or "").lower() != "audio":
+        raise HTTPException(400, "只接受音频")
+    if not (body.data or "").strip():
+        raise HTTPException(400, "没有收到音频数据")
+    return multimodal.asr(body.data, )
+
+
+@app.get("/api/media/health")
+def media_health():
+    """多模态能力自检：前端据此决定是否显示「拍照」「录音」按钮。"""
+    from engine import multimodal
+
+    return multimodal.health()
 
 
 @app.get("/api/agent/briefing")
@@ -1268,7 +1326,7 @@ def chat_stream(body: ChatIn, request: Request):
 
                 result = agent.answer(
                     role, sid, body.message, CONFIG.get("school"),
-                    emit=emit, profile=profile,
+                    emit=emit, profile=profile, attachments=_media(body),
                 )
                 events.put(("final", result))
             except Exception as exc:  # noqa: BLE001

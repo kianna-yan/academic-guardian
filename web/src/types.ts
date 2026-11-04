@@ -900,6 +900,11 @@ export interface SimPayload {
   pass_line: number;
   final_guard: number;
   courses: SimCourse[];
+  /** 五套考核权重方案：A/B/C/D/E，每门课按性质各取一套 */
+  schemes: Record<
+    string,
+    { label: string; components: { key: string; short: string; weight: number }[] }
+  >;
   base: {
     avg: number;
     gpa: number;
