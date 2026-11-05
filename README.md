@@ -292,7 +292,7 @@ POST /api/kb/search   # {"query": "挂过科还能保研吗", "top_k": 3} → �
 
 ## 八、运行
 
-> **线上演示环境（已启用大模型）**：<https://academic-guardian-59801.app.workbuddy.host/?sharecode=4RRGYJTS3B>
+> **线上演示环境（已启用大模型）**：<https://academic-guardian-19259.app.workbuddy.host/?sharecode=MIIDH5PSIP>
 >
 > 该实例配置了 `.env`：`glm-5.3-flash` 负责最终作答、`glm-4.5-air` 负责「该调哪个工具」的决策，侧边栏徽标显示 **大模型已接入 · glm-5.3-flash**，Agent 轨迹里能看到工具调用记录。
 > 克隆仓库在本地直接运行**默认没有 key**，徽标显示「规则引擎模式」、顶部可能提示「未配置大模型」——这是密钥不入库导致的，不是功能缺失；按本节末尾「接入大模型」填入 key 即与大模型版完全一致。
