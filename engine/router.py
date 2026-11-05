@@ -284,19 +284,43 @@ def route(agent, role: str, sid: str | None, message: str, school: str | None = 
                     # 证据链：模型自己挑的工具同样要能追溯（表 / 行数 / 时刻）
                     "evidence": evidence_mod.build(name, result, ms),
                 }
+                got_cites: list[dict] = []
+                if name in ("search_policy", "retrieve_policy") and result.get("ok"):
+                    data = result.get("data") or {}
+                    hits = data.get("条款") or []
+                    meta = agent.kb.meta()
+                    item["retrieval"] = {
+                        "query": args.get("query") or "",
+                        "rewritten": meta.get("rewritten") or "",
+                        "added_terms": meta.get("added_terms") or [],
+                        "channel": meta.get("channel") or "",
+                        "candidates": meta.get("candidates") or 0,
+                        "ms": meta.get("ms"),
+                        "hits": [
+                            {
+                                "rank": i,
+                                "path": h.get("出处") or "",
+                                "school": h.get("学校") or "",
+                                "score": h.get("相关度") or "",
+                                "why": h.get("命中原因") or "",
+                            }
+                            for i, h in enumerate(hits, 1)
+                        ],
+                    }
+                    got_cites = [{
+                        "citation": h.get("出处"),
+                        "text": h.get("原文", ""),
+                        "school": h.get("学校"),
+                        "kind": "policy",
+                        "id": h.get("id"),
+                        "score_pct": h.get("相关度"),
+                        "why": h.get("命中原因"),
+                    } for h in hits]
                 trace.append(item)
                 used_tools.append(name)
                 if emit:
                     emit("tool", item)
-                if name in ("search_policy", "retrieve_policy") and result.get("ok"):
-                    for hit in (result.get("data") or {}).get("条款") or []:
-                        citations.append({
-                            "citation": hit.get("出处"),
-                            "text": hit.get("原文", ""),
-                            "school": hit.get("学校"),
-                            "kind": "policy",
-                            "id": hit.get("id"),
-                        })
+                citations.extend(got_cites)
                 msgs.append({
                     "role": "tool",
                     "tool_call_id": c["id"],

@@ -330,6 +330,13 @@ export interface Citation {
   text: string;
   score?: number;
   school?: string;
+  /** 相关度百分比，如 "78%"，检索打分的归一化结果 */
+  score_pct?: string;
+  /** 命中原因：标题命中 / 语义相近 / 同义扩展命中 */
+  why?: string;
+  kind?: string;
+  doc?: string;
+  snippet?: string;
 }
 
 export interface Letter {
@@ -408,6 +415,28 @@ export interface ChatTrace {
   tool: string;
   args: Record<string, unknown>;
   ms: number;
+  /** 人话标签：多媒体/记忆类步骤自带，前端优先用它 */
+  label?: string;
+  detail?: string;
+  /** 检索明细：改写后的查询、走哪条通道、每条命中多少分 */
+  retrieval?: {
+    query: string;
+    rewritten?: string;
+    added_terms?: string[];
+    channel?: string;
+    candidates?: number;
+    ms?: number;
+    hits?: { rank: number; path: string; school?: string; score?: string; why?: string }[];
+  };
+  evidence?: {
+    source?: string;
+    table?: string;
+    rows?: number;
+    unit?: string;
+    ts?: string;
+    ms?: number;
+    detail?: string;
+  };
 }
 
 export interface ChatAnswer {

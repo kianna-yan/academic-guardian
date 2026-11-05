@@ -758,6 +758,49 @@ def media_health():
     return multimodal.health()
 
 
+@app.get("/api/kb/stats")
+def kb_stats():
+    """知识库自检：多少篇文档、多少个片段、走的哪条向量通道。
+
+    答辩现场可以直接把这个数字念出来：16 篇 / 88 个片段 / 混合检索。
+    """
+    st = KB.stats()
+    docs = []
+    for c in KB.chunks:
+        if not any(d["file"] == c["file"] for d in docs):
+            docs.append({"file": c["file"], "doc": c["doc"], "school": c["school"]})
+    st["files"] = docs
+    return st
+
+
+@app.post("/api/kb/search")
+def kb_search(body: dict):
+    """检索自检：给一个问法，返回改写、通道、每条命中与相关度。
+
+    用来现场演示「同一个问题，BM25 只按字面找，混合检索还能按语义找」。
+    """
+    q = str((body or {}).get("query") or "").strip()
+    if not q:
+        raise HTTPException(400, "query 不能为空")
+    top_k = int((body or {}).get("top_k") or 5)
+    hits = KB.search(q, top_k=top_k, min_score=float((body or {}).get("min_score") or 0.25))
+    return {
+        "meta": KB.meta(),
+        "hits": [
+            {
+                "rank": i,
+                "citation": h.get("citation"),
+                "school": h.get("school"),
+                "score": h.get("score"),
+                "score_pct": h.get("score_pct"),
+                "why": h.get("why"),
+                "snippet": h.get("snippet"),
+            }
+            for i, h in enumerate(hits, 1)
+        ],
+    }
+
+
 @app.get("/api/agent/briefing")
 def agent_briefing(request: Request):
     """主动简报：各端进页面时智能体先开口，页面是它的仪表盘。"""

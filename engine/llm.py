@@ -127,6 +127,26 @@ def _post(body: dict, timeout: int):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+def _open(body: dict, timeout: int, retries: int = 2):
+    """发请求；429 与 5xx 这类瞬时错误自动退避重试。
+
+    智谱对每分钟请求数有上限，连续提问（尤其评测脚本连发时）会撞 429。
+    以前一次 429 就整轮降级成规则引擎作答，用户只看到「回答突然变生硬」，
+    日志里却看不出原因。重试两次基本能把这类抖动挡掉；
+    真失败（401 密钥错、400 参数错）不重试，别把错误拖成三倍耗时。
+    """
+    last: Exception | None = None
+    for i in range(retries + 1):
+        try:
+            return _post(body, timeout)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code not in (429, 500, 502, 503, 504) or i == retries:
+                raise
+            time.sleep(1.2 * (i + 1))
+    raise last  # pragma: no cover
+
+
 def _payload(messages: list[dict], temperature: float, max_tokens: int,
              with_thinking: bool = False, model: str | None = None, **extra) -> dict:
     body = {
@@ -158,7 +178,7 @@ def chat(messages: list[dict], temperature: float = 0.3, max_tokens: int = 700,
     if not available():
         return None
     try:
-        with _post(_payload(messages, temperature, max_tokens, model=model), timeout) as resp:
+        with _open(_payload(messages, temperature, max_tokens, model=model), timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         _mark_ok()
         return (data["choices"][0]["message"].get("content") or "").strip()
@@ -176,7 +196,7 @@ def chat_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
     if not available():
         return
     try:
-        with _post(_payload(messages, temperature, max_tokens, stream=True, model=model), timeout) as resp:
+        with _open(_payload(messages, temperature, max_tokens, stream=True, model=model), timeout) as resp:
             _mark_ok()
             for raw in resp:
                 line = raw.decode("utf-8", "ignore").strip()
@@ -213,7 +233,7 @@ def chat_tools(messages: list[dict], tools: list[dict], temperature: float = 0.2
         tool_choice="auto" if tools else None,
     )
     try:
-        with _post(body, timeout) as resp:
+        with _open(body, timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
@@ -266,7 +286,7 @@ def stream_tools(messages: list[dict], tools: list[dict], temperature: float = 0
     reasoning: list[str] = []
 
     try:
-        with _post(body, timeout) as resp:
+        with _open(body, timeout) as resp:
             _mark_ok()
             for raw in resp:
                 line = raw.decode("utf-8", "ignore").strip()

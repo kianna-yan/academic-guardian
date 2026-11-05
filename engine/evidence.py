@@ -15,8 +15,10 @@ import time
 TOOL_META: dict[str, tuple[str, str, str]] = {
     "risk_score": ("风险引擎", "students · risk_score()", "名学生"),
     "interventions": ("干预建议库", "advice · 规则模板", "条建议"),
-    "retrieve_policy": ("校规知识库", "knowledge/*.md · BM25 索引", "条条款"),
-    "search_policy": ("校规知识库", "knowledge/*.md · BM25 索引", "条条款"),
+    "retrieve_policy": ("校规知识库", "knowledge/*.md · BM25 + 向量混合索引", "条条款"),
+    "search_policy": ("校规知识库", "knowledge/*.md · BM25 + 向量混合索引", "条条款"),
+    "recall_material": ("会话材料记忆", "media · 上一轮上传的原图", "张图"),
+    "llm_route": ("大模型路由", "LLM function calling", "个工具"),
     "roster": ("风险名单", "students · 按风险分排序", "名学生"),
     "campus_overview": ("全校聚合", "students · 分布统计", "名学生"),
     "grade_trend": ("成绩库", "grades · 学期序列", "个学期"),

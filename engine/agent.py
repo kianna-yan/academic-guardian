@@ -22,8 +22,11 @@ from .memory import ConversationMemory, memory_key
 from .rag import KnowledgeBase
 
 POLICY_WORDS = ["校规", "规定", "政策", "教育部", "降级", "劝退", "退学", "学分要求",
-                "多少学分", "几门", "预警线", "通知家长", "什么时候", "多久", "文件"]
-WHY_WORDS = ["为什么", "原因", "怎么回事", "怎么算", "依据", "评估", "风险分", "多少分", "严重"]
+                "多少学分", "几门", "预警线", "通知家长", "什么时候", "多久", "文件",
+                "红色预警", "黄色预警", "绿色预警", "预警等级", "红黄绿", "区别",
+                "保研", "推免", "考研", "升学", "毕业要求"]
+WHY_WORDS = ["为什么", "原因", "怎么回事", "怎么算", "依据", "评估", "风险分", "多少分", "严重",
+             "表现", "最近怎么样", "状态", "情况怎么样", "学得怎么样"]
 ADVICE_WORDS = ["怎么办", "建议", "提高", "计划", "补救", "行动", "帮我", "如何", "怎么改", "来得及",
                "能做什么", "做什么", "帮上忙", "帮什么忙", "在家", "配合", "怎么帮", "能帮", "家长能"]
 ROSTER_WORDS = ["谁", "名单", "哪些", "班级", "几个人", "多少人", "学生"]
@@ -66,8 +69,10 @@ RECORD_WORDS = ["记录一下", "记录", "登记", "已谈", "谈过了", "谈�
 # 指代与追问：这些词本身不带主题，得靠上一轮的记忆补全
 PRONOUN_WORDS = ["他", "她", "这个学生", "这孩子", "那孩子", "这位同学"]
 # 任课老师与联系方式：数据在每门课的 teacher_profile 里，不在校规库里
+# 「几点」太泛：问「机房几点关门」也命中，答成任课老师联系方式就很离谱。
+# 只留明确指向老师的词。
 CONTACT_WORDS = ["老师", "任课", "教师", "电话", "邮箱", "联系方式", "办公室",
-                 "答疑", "几点", "上课时间", "办公时间", "怎么联系", "office hour"]
+                 "答疑", "上课时间", "办公时间", "怎么联系", "office hour"]
 # 考勤明细：问的是「哪几次没去」，要落到具体日期，不是风险分
 ATTENDANCE_WORDS = ["缺勤", "旷课", "没去", "迟到", "考勤", "出勤", "几次课",
                     "哪天没", "请假", "缺席"]
@@ -191,12 +196,74 @@ class Agent:
     def t_actions(self, sid: str) -> list[dict]:
         return self.engine.interventions(sid)
 
-    def t_policy(self, query: str, school: str | None = None) -> list[dict]:
+    def t_policy(self, query: str, school: str | None = None,
+                 context: str = "", top_k: int = 4) -> list[dict]:
         # policy 检索跨全库：评委/学生问的是通用规则，不该被学校名挡住具体条款
         # （如「挂多少学分会被降级」应召回华南理工「降级试读条件·25 学分」，
         #  而非只剩教育部通用政策）。school 参数保留兼容调用，内部不限定。
-        hits = self.kb.search(query, top_k=4, school=None, min_score=0.3)
+        # context 是上一轮用户原话，交给 query 改写补全「那保研呢」这类省略句。
+        hits = self.kb.search(query, top_k=top_k, school=None, min_score=0.3, context=context)
         return hits[:3]
+
+    def _recall_material(self, mkey: str, question: str) -> tuple[str, dict | None, str]:
+        """这一轮没带附件，但用户说的是「刚才那张图」。把材料记忆翻出来。
+
+        两层：先把上次的识别结果原文回灌（够答大部分追问）；问到具体数字 /
+        行 / 名字这类细节时，再把原图重新送一次视觉模型按新问题复核——
+        这样答的是图上写的，不是模型对上一轮的模糊回忆。
+        """
+        from . import media_memory as mm
+        from . import multimodal
+
+        store = mm.media_memory()
+        rec = store.latest(mkey)
+        if not rec or not mm.wants_recall(question):
+            return "", None, ""
+
+        reread = ""
+        trace: dict | None = None
+        images = rec.get("images") or []
+        if images and mm.wants_detail(question):
+            prompt = (
+                f"用户之前上传了这张图片，现在追问：{question}\n"
+                "请只回答这个追问：照图片里能看到的原文、数字、行次回答，"
+                "结论在前、不要复述整张图；图片里确实没有的信息就直接说看不到。"
+            )
+            res = multimodal.vision([i["data"] for i in images], prompt)
+            if res.get("ok"):
+                reread = res["text"]
+                trace = {
+                    "tool": "recall_material",
+                    "label": "重看上次的图",
+                    "args": {"images": len(images), "question": question[:40]},
+                    "ms": res.get("ms", 0),
+                    "evidence": {
+                        "source": "会话材料记忆",
+                        "table": f"{len(images)} 张原图 · {res.get('model', '')}",
+                        "rows": len(images),
+                        "unit": "张图",
+                        "ts": time.strftime("%H:%M:%S"),
+                        "ms": res.get("ms", 0),
+                        "detail": "追问细节时按原图复核，不靠上一轮的概括",
+                    },
+                }
+            else:
+                trace = {
+                    "tool": "recall_material",
+                    "label": "重看上次的图失败",
+                    "args": {"images": len(images)},
+                    "ms": res.get("ms", 0),
+                    "evidence": {
+                        "source": "会话材料记忆",
+                        "table": "原图复核",
+                        "rows": 0,
+                        "unit": "张图",
+                        "ts": time.strftime("%H:%M:%S"),
+                        "ms": res.get("ms", 0),
+                        "detail": res.get("note") or "",
+                    },
+                }
+        return mm.as_block(rec, question, reread), trace, reread
 
     def t_roster(self, class_name: str | None = None, level: str | None = None, limit: int = 8) -> list[dict]:
         return self.engine.roster(class_name, level)[:limit]
@@ -422,6 +489,17 @@ class Agent:
             scores["advice"] += 1.5
         if "降级" in text or "劝退" in text or "规定" in text:
             scores["policy"] += 2
+        # 「风险分是怎么算的」「红黄绿怎么划」问的是系统的评分口径，
+        # 答案在知识库的系统规则里，不该模型凭印象讲——让它走检索，带出处。
+        # 但「把某人风险分改成 20」是要求改数据，不是问口径，必须排除。
+        if (any(w in text for w in ["风险分", "评分口径", "预警等级", "阈值", "红黄绿",
+                                    "怎么算出来的", "如何计算"])
+                and not any(w in text for w in ["改", "设成", "调成", "提高", "降低",
+                                                "加", "减", "变成", "写成", "重算"])
+                # 「我的风险分为什么这么高」是问自己的情况，不是问口径
+                and not any(w in text for w in ["为什么", "这么高", "怎么回事", "怎么办"])):
+            scores["policy"] += 2.5
+            scores["score"] -= 1.0
         # "我这学期在涨还是在掉" 这类问法，trend 必须压过 why/advice
         if any(w in text for w in ["趋势", "走势", "退步", "进步", "名次", "成绩变化"]):
             scores["trend"] += 2.5
@@ -473,6 +551,26 @@ class Agent:
         if any(w in text for w in ["异议", "申诉", "复核"]):
             scores["appeal"] += 2.6
             scores["roster"] -= 1.5
+        # 「计科2401 班有几个人在红色预警」：问的是人数分布，不是条款。
+        # 「红色预警」进 POLICY_WORDS 之后这类问法会被抢走，这里把人数问法顶回来。
+        # 「全校一共多少人」问的是总览，别被人数词拉到班级名单上。
+        if (any(w in text for w in ["几个人", "多少人", "几人", "几个学生", "多少学生"])
+                and not any(w in text for w in ["全校", "整体", "学校总共", "学校一共"])):
+            scores["roster"] += 1.8
+            scores["policy"] -= 1.0
+        # 「帮我看看谁最危险」：带「谁 + 危险/风险」问的是名单，不是行动建议；
+        # 否则会输给 ADVICE_WORDS 里的「帮我」，答成一堆通用建议。
+        if any(w in text for w in ["谁最", "谁的风险", "谁的预警", "哪些人", "哪几个人"]) and any(
+                w in text for w in ["危险", "风险", "预警", "挂科", "出问题"]):
+            scores["roster"] += 2.8
+            scores["advice"] -= 1.2
+        # 但「申诉的流程/时限/要什么材料」问的是制度条款，不是某条异议的进度，
+        # 这时候必须让 policy 反超，否则答出来是一串不存在异议的处理状态。
+        if any(w in text for w in ["申诉", "复核", "异议"]) and any(
+                w in text for w in ["流程", "时限", "期限", "几天", "多久", "材料", "条件",
+                                    "怎么规定的", "规定", "办法", "能不能申诉", "可以申诉"]):
+            scores["policy"] += 4.0
+            scores["appeal"] -= 3.0
         # 家校消息：家长问「辅导员有没有发消息」，和系统通知是两回事
         if any(w in text for w in ["消息", "私信", "聊天记录", "回复我"]):
             scores["message"] += 2.6
@@ -528,9 +626,12 @@ class Agent:
         if not hits:
             return "知识库里没有检索到直接对应的条款。可以换个说法，比如“挂多少学分会被降级”。"
         lines = ["查到以下规定："]
-        for h in hits:
-            first = h["text"].strip().split("\n")[0]
-            lines.append(f"- **{h['title']}**：{first}")
+        for i, h in enumerate(hits, 1):
+            body = re.sub(r"\s*\n\s*", " ", h["text"]).strip()
+            if len(body) > 160:
+                body = body[:158] + "…"
+            tag = f"（{h['school']}·{h.get('score_pct', '')}）" if h.get("school") else ""
+            lines.append(f"[{i}] **{h['path']}**{tag}：{body}")
         lines.append("\n以上条款来自知识库原文，可在下方引用里核对。")
         return "\n".join(lines)
 
@@ -879,8 +980,27 @@ class Agent:
                     emit("tool", item)
             if media_block:
                 message = (media_block + "\n\n" + raw_message).strip()
+                # 材料进会话记忆：下一轮追问「刚才那张图」时才有得翻
+                if profile:
+                    from . import media_memory as mm
+                    mm.media_memory().remember(
+                        memory_key(profile), attachments, media_block)
             if media_problems:
                 self._last_media_problems = media_problems
+
+        reread = ""
+        # ---- 材料记忆：这轮没带附件，问的是「刚才那张图」 ----
+        # 放在意图判定之前：追问「图里第三行是多少」本身不带业务关键词，
+        # 让意图判断先看到材料原文，才可能落到「查成绩 / 查分数」这些分支上。
+        if profile and not attachments and raw_message:
+            recalled, mat_trace, reread = self._recall_material(memory_key(profile), raw_message)
+            if recalled:
+                think("这轮没带附件，但问的是之前发过的材料，先把那次的识别结果取回来。")
+                message = (recalled + "\n\n" + message).strip()
+                if mat_trace:
+                    trace.append(mat_trace)
+                    if emit:
+                        emit("tool", mat_trace)
 
         intent = self._intent(message)
 
@@ -969,6 +1089,81 @@ class Agent:
             if emit:
                 emit("tool", item)
             return result
+
+        def call_rag(query: str, school: str | None = None) -> list[dict]:
+            """检索校规库（混合检索），并把「怎么召回的」一起写进轨迹。
+
+            只记「查了校规库」说服力不够：评委问「这条规定哪来的」，
+            轨迹里得能看到改写后的查询、两路通道多少候选、每条的相关度
+            与命中原因，才叫可核查的检索。
+            """
+            start = time.time()
+            hist_ctx = ""
+            if mkey and self.memory:
+                prev = self.memory.history(mkey)
+                if prev and prev[-1].get("message"):
+                    hist_ctx = str(prev[-1]["message"])[:80]
+            hits = self.t_policy(query=query, school=school, context=hist_ctx)
+            ms = round((time.time() - start) * 1000, 1)
+            meta = self.kb.meta()
+            item = {
+                "tool": "retrieve_policy",
+                "args": {"query": query, "top_k": 3},
+                "ms": ms,
+                "evidence": build_evidence("retrieve_policy", hits, ms),
+                "retrieval": {
+                    "query": query,
+                    "rewritten": meta.get("rewritten") or "",
+                    "added_terms": meta.get("added_terms") or [],
+                    "channel": meta.get("channel") or "",
+                    "candidates": meta.get("candidates") or 0,
+                    "ms": meta.get("ms"),
+                    "hits": [
+                        {
+                            "rank": i,
+                            "path": h.get("path") or "",
+                            "school": h.get("school") or "",
+                            "score": h.get("score_pct") or "",
+                            "why": h.get("why") or "",
+                        }
+                        for i, h in enumerate(hits, 1)
+                    ],
+                },
+            }
+            trace.append(item)
+            if emit:
+                emit("tool", item)
+            return hits
+
+        # ---- 改数据类请求：分数与预警等级是算出来的，没有手工写入口 ----
+        # 这类请求以前会落到「查风险分」的确定性分支上，答出一堆明细，
+        # 用户以为我们同意改了。必须是明确拒绝 + 给出正当的替代路径。
+        if (any(w in raw_message for w in ["风险分", "预警等级", "预警级别", "评分"])
+                and re.search(r"(?:改|设|调|写|变成)(?:成|为)?\s*\d+", raw_message)):
+            think("用户要求手工改风险分——这是改数据，直接说明做不到，并给正当路径。")
+            reply = (
+                "风险分不能手工改。它是六个因素按权重算出来的结果，"
+                "改一个数字等于改结论；系统和我的接口里都没有写入口，我也不会为了好看去动它。\n\n"
+                "如果确实是这套分数不合理，能做的两件事：\n"
+                "1. **改口径**：在「系统设置」里调整六项权重与红黄绿阈值，改完对全校重新计算；\n"
+                "2. **改原始记录**：病假、缓考这类情况走考勤 / 成绩异议更正，由教务改记录，"
+                "风险分随后自动重算。"
+            )
+            if mkey and self.memory:
+                self.memory.append(mkey, {
+                    "message": raw_message[:200], "reply": reply[:400],
+                    "sid": target_sid, "intent": "refuse", "roster": None,
+                })
+            return {
+                "reply": reply,
+                "intent": "refuse",
+                "citations": [],
+                "trace": trace,
+                "thoughts": thoughts,
+                "action": None,
+                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                "suggestions": self._suggestions(role, "why", target_sid),
+            }
 
         # ---- 与角色无关的四类问题：课表 / 期末试算 / 待办 / 培养方案 ----
         # 这四件事页面上都有数据，但改造前既没有工具也没有意图，五端问到都只能答
@@ -1073,7 +1268,7 @@ class Agent:
                     for i, a in enumerate(acts[:3])))
             if intent == "policy":
                 think("这问的是制度条款，去校规知识库里检索。")
-                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                hits = call_rag(message, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
                 blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
@@ -1098,13 +1293,13 @@ class Agent:
             if not blocks:
                 # 没听懂的问题：先试知识库；检索不到就直说不会，绝不拿风险分充数
                 think("没匹配到已知问法，先去校规知识库试一次。")
-                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                hits = call_rag(message, school=school)
                 if hits:
                     citations = hits
                     blocks.append(self._compose_policy(hits))
                     blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
                 else:
-                    blocks.append("这个问题我暂时答不准，不想瞎猜误事。我擅长这些：")
+                    blocks.append("这个问题我暂时答不准，系统里查不到这类信息，也不想瞎猜误事。我擅长这些：")
                     blocks.append("- 考勤与作业明细：「我哪次作业没交」「我缺了几次课」")
                     blocks.append("- 任课老师联系：「数据结构老师的邮箱」「我的老师都有谁」")
                     blocks.append("- 风险与走势：「我的风险分为什么这么高」「我的成绩走势怎么样」")
@@ -1151,20 +1346,20 @@ class Agent:
                 blocks.append(f"学校的告知函会写明 {s['name']} 的具体问题与补救路径，需要的话我可以导一份家长信给您。")
             elif intent == "policy" or any(w in message for w in ["通知", "规定", "政策", "什么时候", "多少", "几门", "降级", "毕业", "退学"]):
                 think("家长在问学校政策，检索制度库里关于家长通知的条款。")
-                hits = call("retrieve_policy", self.t_policy, query=message + " 家长 学业预警", school=school)
+                hits = call_rag(message + " 家长 学业预警", school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
                 blocks.append(
                     f"对照 {s['name']} 的情况：风险分 {r['score']}（{r['level_label']}），"
                     f"累计挂科 {s['history']['failed_credits']} 学分，目前处于关注与帮扶阶段，尚未触发处分线。")
             elif intent == "unknown":
-                blocks.append("这个问题我答不准，不想瞎猜。我擅长帮您看这些：")
+                blocks.append("这个问题我答不准，也不想瞎猜——系统里查不到这类信息。我擅长帮您看这些：")
                 blocks.append("- 孩子的出勤与作业：「孩子哪次作业没交」「孩子缺了几次课」")
                 blocks.append("- 任课老师联系：「数据结构老师怎么联系」")
                 blocks.append("- 孩子的成绩走势与风险：「孩子成绩怎么样」「孩子的风险分」")
                 blocks.append("- 学校关于家校通知的规定：「学校什么情况下会通知家长」")
             else:
-                hits = call("retrieve_policy", self.t_policy, query="家长 通知 学业预警", school=school)
+                hits = call_rag("家长 通知 学业预警", school=school)
                 citations = hits[:1]
                 blocks.append(f"{s['name']}（{s['class_name']}）本学期状态：{r['level_label']}，风险分 {r['score']}。")
                 blocks.append("具体情况：\n" + "\n".join(f"- {x}" for x in self._factor_detail(s, r)[:3]))
@@ -1310,7 +1505,7 @@ class Agent:
                 blocks.append("教学层面可做：①缺勤集中的章节下次上课前提一句考勤；②作业未交的在下节课前补交截止；③红色学生建议联系辅导员联动。")
             elif intent == "policy":
                 think("问的是校规条款，去知识库检索。")
-                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                hits = call_rag(message, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
             elif intent == "contact":
@@ -1324,7 +1519,7 @@ class Agent:
                 for c in row["courses"]:
                     blocks.append(f"- **{c['name']}**：期中 {c.get('midterm', '—')}，缺勤 {c.get('absent', 0)} 次，作业 {c.get('hw_submitted', 0)}/{c.get('hw_assigned', 0)}。")
             elif intent == "unknown":
-                blocks.append("这个问题我答不准。我擅长帮你看：")
+                blocks.append("这个问题我答不准，系统里查不到这类信息。我擅长帮你看：")
                 blocks.append("- 你教的课与学生：「我教的课」「我课上的学生」「班均多少」")
                 blocks.append("- 某学生的考勤与作业：「张三缺了几次课」「李四哪次作业没交」")
                 blocks.append("- 风险研判：「谁的风险最高」「王五为什么风险分高」")
@@ -1513,7 +1708,7 @@ class Agent:
                         blocks.append("当前没有符合条件的红色预警学生。")
             elif intent == "policy":
                 think("这问的是制度条款，去校规知识库里检索。")
-                hits = call("retrieve_policy", self.t_policy, query=message, school=school)
+                hits = call_rag(message, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
             elif intent == "contact":
@@ -1530,7 +1725,7 @@ class Agent:
                 acts = call("interventions", self.t_actions, sid=target_sid)
                 blocks.append(f"最该先做的一件事：**{acts[0]['title']}**。")
             else:
-                blocks.append("可以问我：某个学生的风险原因（直接说名字）、班级风险名单、校规条款，或全校整体情况。")
+                blocks.append("这个我查不到——系统里没有这类数据（不在学情库里）。可以问我：某个学生的风险原因（直接说名字）、班级风险名单、校规条款，或全校整体情况。")
 
         reply = "\n\n".join(blocks)
 
@@ -1549,7 +1744,15 @@ class Agent:
 
         if llm.available():
             context = "\n".join(blocks)
-            cit = "\n".join(f"- {c['citation']}：{c['text'][:120]}" for c in citations)
+            cit = "\n".join(
+                f"[{i}] {c['citation']}"
+                f"（{c.get('school', '')}{'·' if c.get('school') else ''}相关度 {c.get('score_pct', '')}）："
+                f"{c['text'][:180]}"
+                for i, c in enumerate(citations, 1)
+            )
+            if cit:
+                cit += ("\n（引用条款时在句末用序号标注，如 [1][2]；"
+                        "只能引用上面列出的这几条，没有的条款不要编。）")
             # 多轮上下文：把最近两轮的问答摘要给模型，它才知道"他"是谁
             hist_txt = ""
             if mkey and self.memory:
@@ -1637,6 +1840,13 @@ class Agent:
                 "text": (f"{tv.get('teacher', '')} 名下 {len(tv.get('students') or [])} 名修课学生，"
                          f"风险分与缺勤、未交作业次数逐人汇总。"),
             }]
+
+        # ---- 追问材料：把「图上写的是多少」摆到最前面 ----
+        # 不加这段的话，用户问「第三行是哪门课」，规则链会按意图去查系统成绩，
+        # 回一串系统里的课，图上的内容一个字都没答——用户会觉得「它又忘了」。
+        if reread:
+            reply = (f"从你之前发的那张图上看到：{reread.strip()}\n\n"
+                     "下面是系统里记的数据，两边对不上时以系统为准：\n\n" + reply)
 
         # ---- 写记忆：这轮"在说谁"要记住，下一轮的"他/第N个"才能接上 ----
         roster_snapshot = None

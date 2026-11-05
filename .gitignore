@@ -74,3 +74,6 @@ data/
 !docs/data/sample-grades.csv
 !.env.example
  
+
+# 知识库向量缓存（首次启动自动重建）
+data/kb_vectors.json

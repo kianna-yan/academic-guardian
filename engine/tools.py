@@ -1156,14 +1156,19 @@ def _t_search_policy(agent, role, sid, args):
     if not hits:
         return {"ok": False, "note": f"知识库里没有检索到「{q}」相关条款。请如实告诉用户没有对应规定，"
                                      f"建议咨询教务，不要凭印象编条款。"}
+    meta = agent.kb.meta()
     return {"ok": True, "data": {
         "检索词": q,
+        "改写后检索词": meta.get("rewritten") or "",
+        "检索通道": meta.get("channel") or "",
         "条款": [{
             "出处": h.get("citation"),
             "学校": h.get("school"),
+            "相关度": h.get("score_pct"),
+            "命中原因": h.get("why"),
             "原文": (h.get("text") or "")[:400],
         } for h in hits[:3]],
-        "说明": "回答时必须注明出自哪一条，不要改写条款里的数字。",
+        "说明": "回答时必须注明出自哪一条（用 [1][2] 序号对应上表顺序），不要改写条款里的数字。",
     }}
 
 
