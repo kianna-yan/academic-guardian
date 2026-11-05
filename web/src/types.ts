@@ -592,6 +592,14 @@ export interface TeacherResource {
   note?: string;
   teacher: string;
   created_at: string;
+  /** 是否已进 AI 知识库（上传时自动解析入库） */
+  kb?: {
+    ok: boolean;
+    note?: string;
+    doc?: string;
+    chars?: number;
+    sections?: number;
+  };
 }
 
 /* ------------------------------------------------------------------

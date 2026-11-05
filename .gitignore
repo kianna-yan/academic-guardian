@@ -77,3 +77,5 @@ data/
 
 # 知识库向量缓存（首次启动自动重建）
 data/kb_vectors.json
+# 教师上传的真题/讲义解析出的知识库文档（运行时生成）
+knowledge/resources/

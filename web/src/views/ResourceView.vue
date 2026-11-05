@@ -65,13 +65,20 @@ async function submit() {
   }
   uploading.value = true;
   try {
-    await uploadTeacherResource(f.file, {
+    const res = await uploadTeacherResource(f.file, {
       kind: tab.value,
       course: f.course,
       class_name: f.class_name,
       note: f.note,
     });
-    ElMessage.success("已上传");
+    const kb = res.kb || res.item?.kb;
+    if (kb?.ok) {
+      ElMessage.success(`已上传，并加入 AI 知识库（${kb.sections ?? 0} 段正文可被检索）`);
+    } else if (kb?.note) {
+      ElMessage.warning(`已上传，但没有进知识库：${kb.note}`);
+    } else {
+      ElMessage.success("已上传");
+    }
     uploadForm.value = { file: null, course: "", class_name: "", note: "" };
     // 清掉 file input 的展示
     const inp = document.getElementById("res-file") as HTMLInputElement | null;
@@ -172,6 +179,16 @@ onMounted(load);
               <template v-else> · {{ it.teacher }}老师 · {{ it.created_at }}</template>
             </span>
             <span v-if="it.note" class="tiny res-note">{{ it.note }}</span>
+            <span v-if="isTeacher && it.kb?.ok" class="kb-tag">
+              已入 AI 知识库 · {{ it.kb.sections || 0 }} 段
+            </span>
+            <span
+              v-else-if="isTeacher && it.kb && !it.kb.ok"
+              class="kb-tag off"
+              :title="it.kb.note"
+            >
+              未入库 · {{ it.kb.note }}
+            </span>
           </div>
           <div class="res-side">
             <button class="btn sm" @click="downloadTeacherResource(it.id)">下载</button>
@@ -328,6 +345,26 @@ onMounted(load);
 }
 .res-note {
   color: var(--brand);
+}
+.kb-tag {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #0f6e56;
+  background: #e1f5ee;
+  border: 1px solid #9fe1cb;
+}
+.kb-tag.off {
+  color: #854f0b;
+  background: #faeeda;
+  border-color: #fac775;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .res-side {
   display: flex;

@@ -220,7 +220,7 @@ def _split_long(text: str, limit: int = MAX_CHUNK, overlap: int = OVERLAP) -> li
     return out
 
 
-def _iter_chunks(path: Path) -> list[dict]:
+def _iter_chunks(path: Path, kind: str = "policy") -> list[dict]:
     raw = path.read_text(encoding="utf-8")
     header: dict[str, str] = {}
     for line in raw.splitlines():
@@ -253,6 +253,8 @@ def _iter_chunks(path: Path) -> list[dict]:
                 "title": title,
                 "text": piece.strip(),
                 "order": i * 100 + j,
+                # policy = 权威规章；resource = 教师上传的真题/讲义
+                "kind": kind,
             })
     return chunks
 
@@ -513,10 +515,33 @@ def _rrf(rank: int, k: int = 8) -> float:
 class KnowledgeBase:
     def __init__(self, kb_dir: Path = KB_DIR, cache_file: Path = CACHE_FILE):
         self.chunks: list[dict] = []
+        self.policy_docs = 0
+        self.resource_docs = 0
+        # 政策文档在 knowledge/ 顶层；教师上传的资料在 knowledge/resources/
+        sources: list[tuple[Path, str]] = []
         for path in sorted(kb_dir.glob("*.md")):
             if path.name.lower() in ("readme.md", "index.md"):
                 continue
-            self.chunks.extend(_iter_chunks(path))
+            sources.append((path, "policy"))
+        res_dir = kb_dir / "resources"
+        if res_dir.is_dir():
+            for path in sorted(res_dir.glob("*.md")):
+                sources.append((path, "resource"))
+
+        for path, kind in sources:
+            try:
+                chunks = _iter_chunks(path, kind)
+            except Exception:
+                # 单篇文档坏了不能拖垮整个知识库
+                continue
+            if not chunks:
+                continue
+            self.chunks.extend(chunks)
+            if kind == "policy":
+                self.policy_docs += 1
+            else:
+                self.resource_docs += 1
+
         self.bm25 = BM25(self.chunks)
         self.vec = VectorIndex(self.chunks, cache_file=cache_file)
         self.built_at = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -603,7 +628,7 @@ class KnowledgeBase:
                 "vector": round(cos, 3),
                 "why": _why(title_hit, body_hit, syn_hit, cos, bm_n),
                 "citation": hit["path"],
-                "kind": "policy",
+                "kind": ch.get("kind", "policy"),
                 "snippet": hit["text"][:180],
             })
             rows.append(hit)
@@ -637,11 +662,14 @@ class KnowledgeBase:
         return top
 
     def schools(self) -> list[str]:
-        return sorted({c["school"] for c in self.chunks})
+        return sorted({c["school"] for c in self.chunks if c.get("kind") != "resource"})
 
     def stats(self) -> dict:
+        res = [c for c in self.chunks if c.get("kind") == "resource"]
         return {
-            "docs": len({c["file"] for c in self.chunks}),
+            "docs": self.policy_docs,
+            "resources": self.resource_docs,
+            "resource_chunks": len(res),
             "chunks": len(self.chunks),
             "chars": sum(len(c["text"]) for c in self.chunks),
             "schools": self.schools(),
@@ -692,8 +720,36 @@ def kb() -> KnowledgeBase:
 
 
 def rebuild() -> dict:
-    """重建索引（改了 knowledge/*.md 之后调用，向量走缓存，只算新增片段）。"""
+    """重建索引（改了 knowledge/*.md 或教师新上传资料后调用）。
+
+    向量按 (模型 + 片段哈希) 缓存，只有新增片段需要调 embedding，
+    所以通常几百毫秒到一两秒，说不上贵。
+
+    注意这里是**原地换血**，不是把 _KB 指向新对象：app.py 的 `KB = rag.kb()`
+    和 Agent 里的 kb 都是启动时拿到的引用，换对象它们仍然看着旧索引，
+    表现就是「上传成功了，但 AI 一直答不出来」。
+    """
     global _KB
     with _KB_LOCK:
-        _KB = KnowledgeBase()
+        fresh = KnowledgeBase()
+        if _KB is None:
+            _KB = fresh
+        else:
+            _KB.chunks = fresh.chunks
+            _KB.bm25 = fresh.bm25
+            _KB.vec = fresh.vec
+            _KB.policy_docs = fresh.policy_docs
+            _KB.resource_docs = fresh.resource_docs
+            _KB.built_at = fresh.built_at
         return _KB.stats()
+
+
+def rebuild_async() -> None:
+    """后台重建：上传接口不该为了索引等一两秒，失败了也不影响文件已经存好。"""
+    def run() -> None:
+        try:
+            rebuild()
+        except Exception:
+            pass
+
+    threading.Thread(target=run, daemon=True).start()

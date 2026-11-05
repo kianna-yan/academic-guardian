@@ -51,6 +51,16 @@ SCHEDULE_WORDS = ["课表", "上课", "有课", "没课", "第几节", "几节�
 # 期末试算：还没考的那场到底要拿多少分
 FORECAST_WORDS = ["期末", "才不挂", "能过", "能不能过", "要考多少", "拿多少分才能",
                   "目标分", "想拿", "还有救", "稳过"]
+# 课程资料：老师上传的真题 / 讲义。和「期末能过吗」要分开——前者问往年试卷内容，
+# 后者问成绩预测，一个该去检索资料，一个该算分。
+MATERIAL_WORDS = ["真题", "试卷", "往年", "历年", "考了什么", "考什么", "考点",
+                  "讲义", "课件", "网课", "复习资料", "老师发的", "上传的资料", "题目"]
+# 课程名 / 资料词：出现这些才值得去翻教师上传的资料库。
+# 「我缺了几次课」这种问法翻资料库纯属浪费一次检索，白等 300 毫秒。
+MATERIAL_HINT_WORDS = ("数据结构", "高等数学", "高数", "线性代数", "概率论", "大学英语",
+                       "大学物理", "大物", "电路", "操作系统", "计算机网络", "数据库",
+                       "编译原理", "软件工程", "离散数学", "算法", "讲义", "课件",
+                       "真题", "试卷", "资料", "考点", "网课")
 # 待办与通知：铃铛和待办列表里的东西
 TODO_WORDS = ["待办", "未读", "消息", "提醒", "待处理", "要做的事", "新通知", "有没有通知"]
 # 培养方案：毕业学分、必修选修
@@ -197,13 +207,20 @@ class Agent:
         return self.engine.interventions(sid)
 
     def t_policy(self, query: str, school: str | None = None,
-                 context: str = "", top_k: int = 4) -> list[dict]:
+                 context: str = "", top_k: int = 4,
+                 min_score: float = 0.3, kind: str | None = None,
+                 limit: int = 3) -> list[dict]:
         # policy 检索跨全库：评委/学生问的是通用规则，不该被学校名挡住具体条款
         # （如「挂多少学分会被降级」应召回华南理工「降级试读条件·25 学分」，
         #  而非只剩教育部通用政策）。school 参数保留兼容调用，内部不限定。
         # context 是上一轮用户原话，交给 query 改写补全「那保研呢」这类省略句。
-        hits = self.kb.search(query, top_k=top_k, school=None, min_score=0.3, context=context)
-        return hits[:3]
+        # kind="resource" 只留教师上传的真题/讲义，用来和校规条款分开；
+        # limit 是最终给模型看的条数——课程资料常被切成一题一段，要多给几条。
+        hits = self.kb.search(query, top_k=top_k, school=None,
+                              min_score=min_score, context=context)
+        if kind:
+            hits = [h for h in hits if h.get("kind") == kind]
+        return hits[:limit]
 
     def _recall_material(self, mkey: str, question: str) -> tuple[str, dict | None, str]:
         """这一轮没带附件，但用户说的是「刚才那张图」。把材料记忆翻出来。
@@ -479,6 +496,7 @@ class Agent:
             "score": hit(SCORE_WORDS) * 1.25,
             "timetable": hit(SCHEDULE_WORDS) * 1.6,
             "forecast": hit(FORECAST_WORDS) * 1.5,
+            "material": hit(MATERIAL_WORDS) * 2.6,
             "todo": hit(TODO_WORDS) * 1.4,
             "plan": hit(PLAN_WORDS) * 1.5,
             "appeal": hit(APPEAL_WORDS) * 2.6,
@@ -487,6 +505,10 @@ class Agent:
         }
         if "怎么办" in text or "建议" in text:
             scores["advice"] += 1.5
+        # 「去年期末考了什么」问的是往年试卷，不是「期末能过吗」的成绩预测：
+        # material 命中时把 forecast 压下去，否则资料检索永远轮不到。
+        if hit(MATERIAL_WORDS):
+            scores["forecast"] -= 2.0
         if "降级" in text or "劝退" in text or "规定" in text:
             scores["policy"] += 2
         # 「风险分是怎么算的」「红黄绿怎么划」问的是系统的评分口径，
@@ -633,6 +655,33 @@ class Agent:
             tag = f"（{h['school']}·{h.get('score_pct', '')}）" if h.get("school") else ""
             lines.append(f"[{i}] **{h['path']}**{tag}：{body}")
         lines.append("\n以上条款来自知识库原文，可在下方引用里核对。")
+        return "\n".join(lines)
+
+    def _compose_material(self, hits: list[dict]) -> str:
+        """教师上传的真题/讲义：和校规条款分开措辞，学生一看就知道是课程资料。
+
+        命中的常是「全文」「封面」这种只有一行标题的段——学生问「这份卷子考了什么」，
+        只回一句「A 卷」等于没答。所以把同一份资料的其余章节按原顺序补在后面。
+        """
+        if not hits:
+            return ""
+        seen = {h.get("id") for h in hits}
+        files = {h.get("file") for h in hits}
+        extra = [c for c in self.kb.chunks
+                 if c.get("file") in files and c.get("id") not in seen]
+        extra.sort(key=lambda c: c.get("order", 0))
+        rows = list(hits) + extra[:4]
+
+        lines = ["课程资料里查到："]
+        for i, h in enumerate(rows[:6], 1):
+            body = re.sub(r"\s*\n\s*", " ", h.get("text") or "").strip()
+            if len(body) > 200:
+                body = body[:198] + "…"
+            tag = f" · 相关度 {h['score_pct']}" if h.get("score_pct") else ""
+            lines.append(f"[{i}] **{h['path']}**{tag}：{body}")
+        lines.append("\n以上是老师上传的资料原文，可在下方引用里核对；要原文件可以到「学习资源」下载。")
+        lines.append("（只依据上面的原文回答。原文里只有题目、没有答案时，就直说「资料里只有题目、"
+                     "没写答案」，不要凭印象补一个答案；原文没提到就说不确定。）")
         return "\n".join(lines)
 
     def _compose_record(self, text: str, s: dict) -> tuple[str, str, str]:
@@ -1007,6 +1056,20 @@ class Agent:
         if emit:
             emit("meta", {"intent": intent})
 
+        # ---- 老师上传的真题/讲义优先 ----
+        # 必须放在「交给模型自己判断」之前：一旦进了模型路由，它多半凭记忆讲一个
+        # 「差不多的版本」，而课程资料的价值恰恰是「按老师发的那份原文答」。
+        # 0.45 的阈值够挡住寒暄（「你好」只有 0.22），不会把闲聊也塞满引用。
+        if (intent in ("unknown", "material")
+                or any(w in message for w in MATERIAL_HINT_WORDS)) and not citations:
+            mat_hits = self.t_policy(message, min_score=0.35 if intent == "material" else 0.45,
+                                     kind="resource", top_k=8, limit=5)
+            if mat_hits:
+                citations = mat_hits
+                blocks.append(self._compose_material(mat_hits))
+                intent = "material"
+                think(f"老师上传的资料里有相关内容（{mat_hits[0].get('score_pct', '')}），按原文答。")
+
         # ---- 规则引擎认不出的问题，交给模型自己判断该查什么 ----
         # 这是「问几个不同问题却回同一句话」的根因修复：原来所有 unknown
         # 都落到下面同一个 else 分支，输出的是硬编码的那段能力清单。
@@ -1090,12 +1153,17 @@ class Agent:
                 emit("tool", item)
             return result
 
-        def call_rag(query: str, school: str | None = None) -> list[dict]:
+        def call_rag(query: str, school: str | None = None, kind: str | None = None,
+                     min_score: float = 0.3, top_k: int = 4,
+                     limit: int = 3) -> list[dict]:
             """检索校规库（混合检索），并把「怎么召回的」一起写进轨迹。
 
             只记「查了校规库」说服力不够：评委问「这条规定哪来的」，
             轨迹里得能看到改写后的查询、两路通道多少候选、每条的相关度
             与命中原因，才叫可核查的检索。
+
+            kind="resource" 时只保留教师上传的真题/讲义——课程内容问题
+            要的是老师发的那份材料，不能被校规条款挤掉。
             """
             start = time.time()
             hist_ctx = ""
@@ -1103,7 +1171,8 @@ class Agent:
                 prev = self.memory.history(mkey)
                 if prev and prev[-1].get("message"):
                     hist_ctx = str(prev[-1]["message"])[:80]
-            hits = self.t_policy(query=query, school=school, context=hist_ctx)
+            hits = self.t_policy(query=query, school=school, context=hist_ctx,
+                                 min_score=min_score, kind=kind, top_k=top_k, limit=limit)
             ms = round((time.time() - start) * 1000, 1)
             meta = self.kb.meta()
             item = {
@@ -1290,6 +1359,8 @@ class Agent:
                     blocks.append("（说明：学生账号只能看本人成绩，班里其他同学的名次不提供，"
                                   "只能告诉你在本班排第几。）")
                 blocks.extend(call("score_detail", self._compose_scores, sid=sid))
+            if intent == "material":
+                think("问的是课程资料，去老师上传的真题/讲义里检索。")
             if not blocks:
                 # 没听懂的问题：先试知识库；检索不到就直说不会，绝不拿风险分充数
                 think("没匹配到已知问法，先去校规知识库试一次。")

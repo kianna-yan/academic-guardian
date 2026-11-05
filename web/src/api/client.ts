@@ -270,18 +270,18 @@ export const api = {
 export async function uploadTeacherResource(
   file: File,
   fields: { kind: "exam" | "tutorial"; course?: string; class_name?: string; note?: string },
-): Promise<{ ok: boolean; item: TeacherResource }> {
+): Promise<{ ok: boolean; item: TeacherResource; kb?: TeacherResource["kb"] }> {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("kind", fields.kind);
   if (fields.course) fd.append("course", fields.course);
   if (fields.class_name) fd.append("class_name", fields.class_name);
   if (fields.note) fd.append("note", fields.note);
-  const { data } = await http.post<{ ok: boolean; item: TeacherResource }>(
-    "/teacher/resources",
-    fd,
-    { headers: { "Content-Type": "multipart/form-data" } },
-  );
+  const { data } = await http.post<{
+    ok: boolean;
+    item: TeacherResource;
+    kb?: TeacherResource["kb"];
+  }>("/teacher/resources", fd, { headers: { "Content-Type": "multipart/form-data" } });
   return data;
 }
 

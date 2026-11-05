@@ -23,7 +23,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from engine import actions as actions_mod
-from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, simulator, trend
+from engine import accounts, checkin, classroom, curriculum, data, exporter, llm, notifications, rag, report as report_mod, resource_ingest, simulator, trend
 from engine.accounts import COUNSELOR_ACCOUNT
 from engine.agent import Agent
 from engine.letters import class_report, counselor_brief, parent_letter, student_letter
@@ -172,6 +172,9 @@ async def _report_scheduler():
             await asyncio.sleep(30)
 
     asyncio.create_task(loop())
+
+    # 老数据迁移：早先上传的资源只落了盘、没进知识库，启动后补齐（不阻塞启动）
+    threading.Thread(target=_backfill_resources, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -762,15 +765,33 @@ def media_health():
 def kb_stats():
     """知识库自检：多少篇文档、多少个片段、走的哪条向量通道。
 
-    答辩现场可以直接把这个数字念出来：16 篇 / 88 个片段 / 混合检索。
+    答辩现场可以直接把这个数字念出来：16 篇政策 + N 份课程资料 / 混合检索。
     """
     st = KB.stats()
     docs = []
     for c in KB.chunks:
         if not any(d["file"] == c["file"] for d in docs):
-            docs.append({"file": c["file"], "doc": c["doc"], "school": c["school"]})
+            docs.append({"file": c["file"], "doc": c["doc"], "school": c["school"],
+                         "kind": c.get("kind", "policy")})
     st["files"] = docs
+    st["storage"] = _storage_health()
     return st
+
+
+def _storage_health() -> dict:
+    """线上可能把 data/ 挂成只读：写不进去时上传只会留在内存，重启就没了。
+
+    与其等演示当天才发现，不如启动后随时能查一次。这里真写一个探针文件。
+    """
+    probe = BASE / "data" / ".write_probe"
+    try:
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return {"writable": True, "note": "数据目录可写，上传的文件与记录会落盘"}
+    except OSError as e:
+        return {"writable": False,
+                "note": f"数据目录只读（{e.__class__.__name__}）：上传仅在本次进程内有效，重启会丢"}
 
 
 @app.post("/api/kb/search")
@@ -871,6 +892,32 @@ def _resources_save(rows: list[dict]) -> None:
         pass
 
 
+def _backfill_resources() -> None:
+    """老数据迁移：早先上传的资料只落了盘、没进知识库，启动后补一次。
+
+    上线前教师端已经传过文件的话，升级后不用重新传，重启即自动补齐索引。
+    """
+    try:
+        rows = _resources_load()
+        changed = False
+        for row in rows:
+            if (row.get("kb") or {}).get("ok"):
+                continue
+            safe = (row.get("filename") or "").replace("/", "_").replace("\\", "_")
+            target = RESOURCE_DIR / f"{row.get('id')}__{safe}"
+            if not target.exists():
+                continue
+            res = resource_ingest.ingest(row, target)
+            row["kb"] = res
+            changed = changed or bool(res.get("ok"))
+        if changed:
+            _resources_save(rows)
+            rag.rebuild_async()
+        resource_ingest.prune({str(r.get("id") or "") for r in rows})
+    except Exception:
+        pass
+
+
 def _resource_visible(row: dict, profile: dict) -> bool:
     """教师只看自己的；学生看所有；其他端不可见。"""
     role = profile.get("role")
@@ -938,11 +985,17 @@ async def teacher_resources_upload(
         "teacher": teacher_name,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
+    # 入库：抽正文 → 写 knowledge/resources/res-<rid>.md → 后台重建索引。
+    # 解析不了（视频、扫描件）也不影响上传本身，原因放在 kb.note 里回给前端。
+    kb_res = resource_ingest.ingest(row, stored)
+    row["kb"] = kb_res
     with _resources_lock:
         rows = _resources_load()
         rows.append(row)
         _resources_save(rows)
-    return {"ok": True, "item": row}
+    if kb_res.get("ok"):
+        rag.rebuild_async()
+    return {"ok": True, "item": row, "kb": kb_res}
 
 
 @app.delete("/api/teacher/resources/{rid}")
@@ -968,6 +1021,9 @@ def teacher_resources_delete(rid: str, request: Request):
             target.unlink()
     except OSError:
         pass
+    # 知识库里的对应文档也要删，否则会检索到「已经删掉的资料」
+    if resource_ingest.remove(rid):
+        rag.rebuild_async()
     return {"ok": True}
 
 
