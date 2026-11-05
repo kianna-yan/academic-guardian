@@ -120,7 +120,7 @@ router.beforeEach(async (to) => {
   }
 
   if (!auth.token) {
-    // 不带 next 回跳：四个端的入口是固定的，登录后按身份直接进自己的端，
+    // 不带 next 回跳：五个端的入口是固定的，登录后按身份直接进自己的端，
     // 免得把带 query 的地址再套进 query（会出现 /login?next=/student?sharecode=…&sharecode=…）
     return withShare("/login");
   }
