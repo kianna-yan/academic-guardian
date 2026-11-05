@@ -14,7 +14,7 @@ import {
   type PickedMedia,
   type Recorder,
 } from "@/composables/media";
-import type { Role } from "@/types";
+import type { Role, SkillMeta, SkillSub } from "@/types";
 
 const props = defineProps<{ role: Role; sid: string | null }>();
 
@@ -126,7 +126,7 @@ let recTimer: number | null = null;
 let pressAt = 0;
 let pressY = 0;
 
-const MEDIA_ICON: Record<string, string> = { image: "🖼", video: "🎬", audio: "🎤" };
+const MEDIA_ICON: Record<string, string> = { image: "🖼", video: "🎬", audio: "🎤", text: "📄" };
 const MAX_ATTACH = 3;
 
 function note(msg: string) {
@@ -324,10 +324,14 @@ function send(text: string) {
   const media = attachments.value;
   if (!content && !media.length) return;
   if (chat.streaming) return;
+  const pick = pendingSkill.value;
   draft.value = "";
   attachments.value = [];
+  pendingSkill.value = null;
   cleanupRec();
-  chat.send(props.role, props.sid, content, media);
+  chat.send(props.role, props.sid, content, media, pick ? { key: pick.skill.key, sub: pick.sub?.key } : null);
+  // 技能请求：文字归对话，文件另开一路，互不阻塞（演练类没有文件）
+  if (pick && pick.skill.ext) void makeFile(pick, content);
   scrollToBottom();
 }
 
@@ -365,15 +369,185 @@ function openVideo() {
   videoInput.value?.click();
 }
 
+/* ------------------------------------------------------------------
+ * 「+」里的两个新入口：上传文档 / Skill
+ *
+ * 上传文档：文件交给后端抽正文，回来当成 kind=text 的附件随提问发出——
+ *   和图片走同一条链路，模型看到的就是原文，不需要为它单开一套消息协议。
+ * Skill：菜单由后端按端下发（学生/家长/导员/教务看到的项不一样，提示语也不一样）。
+ *   报告类点了先预填一句提示（用户可以改），发送时后台按当前学情现场渲染文件，
+ *   生成完给一张下载卡；文书辅助进二级菜单选文书类型；家校沟通进二级菜单选家长类型，
+ *   之后直接在对话里演练；图表解读不产文件，开的是图片选择，走已有的视觉识别。
+ * ---------------------------------------------------------------- */
+const docInput = ref<HTMLInputElement | null>(null);
+const docBusy = ref(false);
+const skillOpen = ref(false);
+const skills = ref<SkillMeta[]>([]);
+/** 正在展开二级项的技能（文书辅助 / 家校沟通）；null 时显示一级菜单 */
+const skillDrill = ref<SkillMeta | null>(null);
+interface PendingSkill {
+  skill: SkillMeta;
+  sub?: SkillSub;
+}
+const pendingSkill = ref<PendingSkill | null>(null);
+
+interface MadeFile {
+  id: string;
+  key: string;
+  name: string;
+  size: string;
+  url: string;
+  state: "loading" | "ok" | "fail";
+  note?: string;
+}
+const madeFiles = ref<MadeFile[]>([]);
+
+async function loadSkills() {
+  if (skills.value.length) return;
+  try {
+    skills.value = (await api.skills()).items || [];
+  } catch {
+    /* 拿不到菜单就当没这个入口，别挡住打字 */
+  }
+}
+
+function openDoc() {
+  menuOpen.value = false;
+  skillOpen.value = false;
+  docInput.value?.click();
+}
+
+async function onDocPicked(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    note(`文件太大了（${humanSize(file.size)}），换一份小于 20MB 的`);
+    return;
+  }
+  docBusy.value = true;
+  note("正在把这份文档读成文字…");
+  try {
+    const d = await api.uploadDoc(file);
+    addAttach({
+      id: `doc${Date.now().toString(36)}`,
+      kind: "text",
+      name: d.name || file.name,
+      mime: file.type || "text/plain",
+      data: d.text,
+      size: file.size,
+      chars: d.chars,
+    });
+    if (d.note) note(`${d.name}：${d.note}`);
+    else note(`已读入「${d.name}」，共 ${d.chars} 字`);
+  } catch (e: any) {
+    note((await blobDetail(e)) || e?.message || "这份文档读不出来，换一份试试");
+  } finally {
+    docBusy.value = false;
+  }
+}
+
+/** 出错时后端在某些分支把 detail 包在 blob 里，这里统一取出来 */
+async function blobDetail(e: any): Promise<string> {
+  const d = e?.response?.data;
+  if (d instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await d.text());
+      return parsed?.detail || "";
+    } catch {
+      return "";
+    }
+  }
+  return d?.detail || "";
+}
+
+function toggleSkill() {
+  void loadSkills();
+  skillOpen.value = !skillOpen.value;
+  if (!skillOpen.value) skillDrill.value = null;
+}
+
+/** 有二级项的（文书类型 / 家长类型）先在菜单里选，别把 6 个文书塞进一级菜单 */
+function chooseSkill(s: SkillMeta) {
+  if (s.subs?.length) {
+    skillDrill.value = s;
+    return;
+  }
+  pickSkill(s);
+}
+
+function chooseSub(s: SkillMeta, sub: SkillSub) {
+  pickSkill(s, sub);
+}
+
+function pickSkill(s: SkillMeta, sub?: SkillSub) {
+  skillOpen.value = false;
+  skillDrill.value = null;
+  menuOpen.value = false;
+  if (s.kind === "image") {
+    // 图表解读：直接开图片选择，选完图再配一句话就能发
+    if (!draft.value.trim()) draft.value = s.hint;
+    imageInput.value?.click();
+    return;
+  }
+  pendingSkill.value = { skill: s, sub };
+  if (!draft.value.trim()) {
+    // 预填的话必须带端口味：这句会原样显示在输入框里
+    if (sub) {
+      draft.value =
+        s.kind === "draft" ? `帮我起草一份《${sub.name}》` : `开始一场「${sub.name}」的沟通演练`;
+    } else {
+      draft.value = s.hint;
+    }
+  }
+}
+
+/** 生成技能文件：先摆一张「正在生成」的卡片，回来换成下载链接 */
+async function makeFile(pick: PendingSkill, note = "") {
+  const s = pick.skill;
+  const what = pick.sub ? pick.sub.name : s.name.replace(" 生成", "");
+  const row: MadeFile = {
+    id: `f${Date.now().toString(36)}`,
+    key: s.key,
+    name: `正在生成${what}…`,
+    size: "",
+    url: "",
+    state: "loading",
+  };
+  madeFiles.value = [...madeFiles.value, row];
+  try {
+    // note 是刚发出去的那句话：导员没固定学生，后端要靠它把名字解析出来
+    const { blob, name } = await api.exportSkill(s.key, props.sid, pick.sub?.key, note);
+    row.name = name;
+    row.size = humanSize(blob.size);
+    row.url = URL.createObjectURL(blob);
+    row.state = "ok";
+  } catch (e: any) {
+    row.state = "fail";
+    row.name = `${s.name}没成功`;
+    row.note = (await blobDetail(e)) || "后端没返回文件，稍后再试一次";
+  }
+  madeFiles.value = [...madeFiles.value];
+}
+
 /** 点「+」外面就收起菜单；Esc 同样 */
 function onDocClick() {
   menuOpen.value = false;
+  skillOpen.value = false;
+  skillDrill.value = null;
 }
 watch(menuOpen, (v) => {
   if (v) document.addEventListener("click", onDocClick);
   else document.removeEventListener("click", onDocClick);
 });
 onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+
+/** 文件卡的 blob URL 要自己回收，否则整页一直挂着几份 PPT 的内存 */
+onBeforeUnmount(() => {
+  madeFiles.value.forEach((f) => f.url && URL.revokeObjectURL(f.url));
+});
+watch(() => madeFiles.value.length, scrollToBottom);
 
 // 意图是一个内部枚举值，直接贴 "unknown" 给用户看没意义。
 // 这里翻成人话：用户想知道的是「系统怎么理解我这句话的、去哪找的答案」。
@@ -391,6 +565,9 @@ const INTENT_LABEL: Record<string, string> = {
   unknown: "关键词没命中，交给模型判断",
   llm_route: "模型直接作答",
   llm_tool: "模型自己决定取哪些数据",
+  skill: "按技能生成",
+  doc: "按模板起草文书",
+  family: "家校沟通演练",
 };
 
 function intentLabel(v: string): string {
@@ -426,6 +603,7 @@ function intentLabel(v: string): string {
                   <div class="bm-side">
                     <span class="bm-name">{{ a.name }}</span>
                     <span v-if="a.transcript" class="bm-said">「{{ a.transcript }}」</span>
+                    <span v-else-if="a.chars" class="bm-said">约 {{ a.chars }} 字</span>
                     <span v-else-if="a.duration" class="bm-said">{{ a.duration }} 秒</span>
                   </div>
                 </div>
@@ -455,6 +633,23 @@ function intentLabel(v: string): string {
             <TraceSteps :trace="m.trace" :pending="m.pending" :elapsed="m.elapsed" />
           </template>
         </div>
+
+        <!-- 技能产出的文件：生成中就占位，好了直接点下载 -->
+        <div v-for="f in madeFiles" :key="f.id" class="ch-filecard" :class="f.state">
+          <span class="fc-ico">
+            {{
+              f.key === "ppt" ? "📊" : f.key === "pdf" ? "📄" : "📝"
+            }}
+          </span>
+          <div class="fc-body">
+            <b>{{ f.name }}</b>
+            <i v-if="f.state === 'loading'">正在按当前学情排版…</i>
+            <i v-else-if="f.state === 'fail'">{{ f.note }}</i>
+            <i v-else>{{ f.size }} · 已生成，点右侧下载</i>
+          </div>
+          <a v-if="f.state === 'ok'" class="fc-dl" :href="f.url" :download="f.name">下载</a>
+          <span v-else-if="f.state === 'loading'" class="fc-spin"></span>
+        </div>
       </div>
     </div>
 
@@ -467,6 +662,24 @@ function intentLabel(v: string): string {
         <div v-if="mediaError" class="ch-media-err">{{ mediaError }}</div>
 
         <form class="ch-composer" @submit.prevent="submit">
+          <!-- 选中的技能：发出去才会真的生成文件，先给个可撤的标签 -->
+          <div v-if="pendingSkill" class="ch-skilltag">
+            <span>
+              {{ pendingSkill.skill.icon }} {{ pendingSkill.skill.name }}
+              <template v-if="pendingSkill.sub">· {{ pendingSkill.sub.name }}</template>
+            </span>
+            <i>
+              {{
+                pendingSkill.skill.kind === "roleplay"
+                  ? "演练即将开始"
+                  : pendingSkill.skill.kind === "draft"
+                    ? "只起草，不代提交"
+                    : "发出去就按当前学情生成"
+              }}
+            </i>
+            <button type="button" title="取消这个技能" @click="pendingSkill = null">×</button>
+          </div>
+
           <!-- 待发送的附件：就贴在输入区里，发之前能确认带对没带对 -->
           <div v-if="attachments.length" class="ch-attach">
             <div v-for="a in attachments" :key="a.id" class="ch-attach-item">
@@ -475,7 +688,15 @@ function intentLabel(v: string): string {
               <div class="ch-attach-meta">
                 <span class="nm">{{ a.name }}</span>
                 <span class="sz">
-                  {{ a.kind === "video" ? `抽了 ${a.frames?.length || 0} 帧` : a.duration ? `${a.duration} 秒` : humanSize(a.size) }}
+                  {{
+                    a.kind === "text"
+                      ? `约 ${a.chars || 0} 字`
+                      : a.kind === "video"
+                        ? `抽了 ${a.frames?.length || 0} 帧`
+                        : a.duration
+                          ? `${a.duration} 秒`
+                          : humanSize(a.size)
+                  }}
                 </span>
               </div>
               <button type="button" class="ch-attach-x" title="移除" @click="removeAttach(a.id)">
@@ -576,11 +797,108 @@ function intentLabel(v: string): string {
                     </span>
                     <span class="tx"><b>视频</b><i>本地抽 4 帧，不上传整段</i></span>
                   </button>
+                  <!-- 上传文档：PDF / Word / PPT / Excel / TXT 都交给后端抽正文 -->
+                  <button type="button" :disabled="docBusy" @click="openDoc">
+                    <span class="ic">
+                      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                        <path
+                          d="M6 3.2h7.2L19 9v11.2a1.6 1.6 0 0 1-1.6 1.6H6a1.6 1.6 0 0 1-1.6-1.6V4.8A1.6 1.6 0 0 1 6 3.2z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M13 3.4V9h5.6M8 13h7M8 16.4h5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="tx">
+                      <b>上传文档</b>
+                      <i>{{ docBusy ? "正在读…" : "PDF / Word / PPT / Excel" }}</i>
+                    </span>
+                  </button>
+
+                  <!-- Skill：右侧展开二级菜单；文书/家校沟通有第二层（类型） -->
+                  <button
+                    type="button"
+                    class="has-sub"
+                    :class="{ on: skillOpen }"
+                    @click.stop="toggleSkill"
+                  >
+                    <span class="ic">
+                      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                        <path
+                          d="M12 3.2l1.9 4.4 4.4 1.9-4.4 1.9L12 15.8l-1.9-4.4L5.7 9.5l4.4-1.9z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M17.6 15.2l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.4"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="tx"><b>Skill</b><i>报告 · 文书 · 家校演练</i></span>
+                    <span class="arr">›</span>
+                  </button>
+
+                  <!-- 二级菜单必须是「+ 菜单」的兄弟节点：
+                       塞进上面的 button 里就变成按钮套按钮，浏览器会把结构拆坏 -->
+                  <transition name="ch-pop">
+                    <div v-if="skillOpen" class="ch-sub" @click.stop>
+                      <!-- 二级项：文书类型 / 家长类型。就地展开，不做第三层浮层 -->
+                      <template v-if="skillDrill">
+                        <div class="sub-head sub-head-back">
+                          <button type="button" class="sub-back" @click="skillDrill = null">‹ 返回</button>
+                          <span>{{ skillDrill.name }}</span>
+                        </div>
+                        <button
+                          v-for="d in skillDrill.subs"
+                          :key="d.key"
+                          type="button"
+                          class="sub-item"
+                          :data-sub="d.key"
+                          @click="chooseSub(skillDrill, d)"
+                        >
+                          <span class="sub-ic">{{ skillDrill.icon }}</span>
+                          <span class="tx"><b>{{ d.name }}</b><i>{{ d.desc }}</i></span>
+                        </button>
+                        <div v-if="skillDrill.note" class="sub-note">{{ skillDrill.note }}</div>
+                      </template>
+
+                      <template v-else>
+                        <div class="sub-head">选一个技能</div>
+                        <button
+                          v-for="s in skills"
+                          :key="s.key"
+                          type="button"
+                          class="sub-item"
+                          :data-skill="s.key"
+                          @click="chooseSkill(s)"
+                        >
+                          <span class="sub-ic">{{ s.icon }}</span>
+                          <span class="tx"><b>{{ s.name }}</b><i>{{ s.desc }}</i></span>
+                          <span v-if="s.subs?.length" class="sub-arr">›</span>
+                        </button>
+                        <div v-if="!skills.length" class="sub-empty">技能列表没加载出来，再点一次 Skill</div>
+                      </template>
+                    </div>
+                  </transition>
                 </div>
               </transition>
             </div>
 
-            <span class="ch-tip">图片 · 视频 · 按住说话</span>
+            <span class="ch-tip">图片 · 文档 · 技能 · 按住说话</span>
 
             <button
               type="button"
@@ -649,6 +967,13 @@ function intentLabel(v: string): string {
           accept="video/*"
           class="ch-file"
           @change="onVideoPicked"
+        />
+        <input
+          ref="docInput"
+          type="file"
+          accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.markdown,.csv"
+          class="ch-file"
+          @change="onDocPicked"
         />
       </div>
     </div>
@@ -739,6 +1064,111 @@ function intentLabel(v: string): string {
 }
 .ch-attach-x:hover {
   background: #e8d5bd;
+}
+
+/* 选中的技能：一条可撤销的标签，说明「发出去会生成文件」 */
+.ch-skilltag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 9px;
+  border: 1px dashed #e2b884;
+  border-radius: 9px;
+  background: #fdf7ec;
+  font-size: 11.5px;
+  color: #8a5a1f;
+}
+.ch-skilltag i {
+  font-style: normal;
+  font-size: 10.5px;
+  color: #b08a5a;
+}
+.ch-skilltag button {
+  border: 0;
+  background: transparent;
+  color: #a98b62;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.ch-skilltag button:hover {
+  color: #b45309;
+}
+
+/* 技能产出的文件卡：生成中占位，好了直接下载 */
+.ch-filecard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #ecdfc9;
+  border-radius: 12px;
+  background: #fffdf8;
+}
+.ch-filecard .fc-ico {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #f6efe2;
+  font-size: 16px;
+}
+.ch-filecard .fc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ch-filecard .fc-body b {
+  font-size: 12.5px;
+  color: #3b2e24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-filecard .fc-body i {
+  font-style: normal;
+  font-size: 10.5px;
+  color: #a58c72;
+}
+.ch-filecard.fail {
+  border-color: #f3d6d6;
+  background: #fef7f7;
+}
+.ch-filecard .fc-dl {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+  text-decoration: none;
+}
+.ch-filecard .fc-dl:hover {
+  filter: brightness(1.06);
+}
+.ch-filecard .fc-spin {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e8dcc6;
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: fcspin 0.8s linear infinite;
+}
+@keyframes fcspin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ch-media-err {

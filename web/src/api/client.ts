@@ -24,6 +24,7 @@ import type {
   Role,
   RosterRow,
   SimPayload,
+  SkillMeta,
   StudentDetail,
   TeacherClassroom,
   TeacherResource,
@@ -31,6 +32,7 @@ import type {
   TimetablePayload,
   TodoItem,
   TrackPayload,
+  UploadedDoc,
 } from "@/types";
 
 /* ------------------------------------------------------------------
@@ -151,6 +153,24 @@ export const api = {
     post<LoginResult>("/auth/login", body),
   /** 语音转写：录音先转成文字，用户能改完再发 */
   asr: (body: MediaPayload) => post<{ ok: boolean; text?: string; note?: string }>("/asr", body),
+  /** 输入框「+ → Skill」：菜单项与生成文件 */
+  skills: () => get<{ items: SkillMeta[] }>("/skills/catalog"),
+  /** 技能出文件。sub 是二级项：文书类型（suspend/notice…）——普通报告不用传 */
+  exportSkill: async (skill: string, sid?: string | null, sub?: string | null, note?: string) => {
+    const res = await http.post("/skills/export", { skill, sid, sub, note }, { responseType: "blob" });
+    // 后端把中文文件名 URL 编码后放在 X-File-Name，省得前端解析 Content-Disposition
+    const raw = res.headers["x-file-name"];
+    const name = raw ? decodeURIComponent(String(raw)) : `学情报告.${skill}`;
+    return { blob: res.data as Blob, name };
+  },
+  /** 上传文档：后端抽正文，前端拿到 text 当附件发出去 */
+  uploadDoc: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return http
+      .post<UploadedDoc>("/chat/upload", fd, { timeout: 60000 })
+      .then((r) => r.data);
+  },
   /** 多模态能力自检：视觉模型、语音模型是否就绪 */
   mediaHealth: () =>
     get<{ enabled: boolean; vision_model: string; asr_model: string }>("/media/health"),
@@ -244,6 +264,9 @@ export const api = {
   notifications: () => get<NoticePayload>("/notifications"),
   markNoticesRead: (ids: string[]) => post<{ ok: boolean; marked: number }>("/notifications/read", { ids }),
   finishTodo: (id: string) => post<{ ok: boolean; todo: TodoItem }>(`/todos/${id}/finish`, {}),
+  reopenTodo: (id: string) => post<{ ok: boolean; todo: TodoItem }>(`/todos/${id}/reopen`, {}),
+  removeTodo: (id: string) =>
+    http.delete<{ ok: boolean; removed: string }>(`/todos/${id}`).then((r) => r.data),
   submitAppeal: (body: { kind: "attendance" | "homework"; record_id: string; course: string; reason: string }) =>
     post<{ ok: boolean; appeal: AppealItem }>("/appeals", body),
   appeals: () => get<{ items: AppealItem[] }>("/appeals"),
@@ -330,7 +353,15 @@ export interface MediaPayload {
 }
 
 export async function chatStream(
-  body: { role: string; sid: string | null; message: string; attachments?: MediaPayload[] },
+  body: {
+    role: string;
+    sid: string | null;
+    message: string;
+    attachments?: MediaPayload[];
+    /** 点了 Skill 就带上：后端据此走技能自己的回答链路，不再猜意图 */
+    skill?: string | null;
+    sub?: string | null;
+  },
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

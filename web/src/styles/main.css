@@ -942,7 +942,7 @@ a {
   left: 0;
   bottom: calc(100% + 8px);
   z-index: 30;
-  width: 214px;
+  width: 236px;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -990,6 +990,129 @@ a {
   font-size: 10.5px;
   font-style: normal;
   color: var(--muted);
+}
+/* Skill 那一项：右侧箭头，点开右侧的二级菜单 */
+.ch-menu button.has-sub .arr {
+  margin-left: auto;
+  padding-left: 4px;
+  color: #bda98f;
+  font-size: 15px;
+  line-height: 1;
+}
+.ch-menu button.has-sub.on {
+  background: #fdf6ea;
+}
+.ch-sub {
+  position: absolute;
+  left: calc(100% + 6px);
+  bottom: 0;
+  width: 264px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(59, 46, 36, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ch-sub .sub-head {
+  padding: 4px 8px 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.ch-sub .sub-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+.ch-sub .sub-item:hover {
+  background: #fdf6ea;
+}
+.ch-sub .sub-ic {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  font-size: 15px;
+}
+.ch-sub .tx {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+  min-width: 0;
+}
+.ch-sub .tx b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ch-sub .tx i {
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--muted);
+  /* 一行放不下就省略：菜单项高度不一致会让 6 项挤成一团 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-sub .sub-empty {
+  padding: 10px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+/* 有二级项的技能：右侧箭头提示「还能再点一层」 */
+.ch-sub .sub-arr {
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ch-sub .sub-head-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ch-sub .sub-back {
+  border: 0;
+  background: transparent;
+  padding: 0 4px 0 0;
+  color: var(--brand);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ch-sub .sub-back:hover {
+  text-decoration: underline;
+}
+/* 合规提示：只起草不提交这类边界，要让人在点之前看见 */
+.ch-sub .sub-note {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fdf6ea;
+  color: #a9784a;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+/* 窄屏没有右侧空间：二级菜单就地展开，别跑出屏幕 */
+@media (max-width: 720px) {
+  .ch-sub {
+    position: static;
+    width: 100%;
+    margin-top: 2px;
+    box-shadow: none;
+    border-color: #f0e3d0;
+  }
 }
 .ch-pop-enter-active,
 .ch-pop-leave-active {

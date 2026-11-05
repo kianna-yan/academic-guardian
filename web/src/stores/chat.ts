@@ -23,11 +23,13 @@ export interface ChatMessage {
 
 /** 气泡里回显附件用的轻量结构：大块 base64 不进 localStorage */
 export interface ChatMedia {
-  kind: "image" | "video" | "audio";
+  kind: "image" | "video" | "audio" | "text";
   name: string;
   thumb?: string;
   duration?: number;
   transcript?: string;
+  /** kind=text（上传文档）时抽出来的字数 */
+  chars?: number;
 }
 
 const GREETING: Record<Role, string> = {
@@ -177,7 +179,13 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  async function send(role: Role, sid: string | null, text: string, attachments: PickedMedia[] = []) {
+  async function send(
+    role: Role,
+    sid: string | null,
+    text: string,
+    attachments: PickedMedia[] = [],
+    skill?: { key: string; sub?: string | null } | null,
+  ) {
     const content = text.trim();
     const media = attachments.filter(Boolean);
     if (!content && !media.length) return;
@@ -192,6 +200,7 @@ export const useChatStore = defineStore("chat", () => {
       thumb: m.thumb,
       duration: m.duration,
       transcript: m.transcript,
+      chars: m.chars,
     }));
 
     messages.value.push({
@@ -235,6 +244,9 @@ export const useChatStore = defineStore("chat", () => {
           sid,
           message: content || (media.length ? "看看我发的这个" : ""),
           attachments: payload.length ? payload : undefined,
+          // 技能这一轮由后端按技能组织回答，不再让意图打分去猜预填的话
+          skill: skill?.key || undefined,
+          sub: skill?.sub || undefined,
         },
         (ev) => {
         switch (ev.type) {

@@ -31,9 +31,20 @@ export const useNoticeStore = defineStore("notices", () => {
   const listeners = new Set<(items: NoticeItem[]) => void>();
 
   const unreadCount = computed(() => unread.value.length);
-  /** 面板只列「还没做的」：勾掉的待办直接消失，而不是留在列表里划横线 */
-  const openTodos = computed(() => todos.value.filter((t) => !t.done));
-  const todoCount = computed(() => openTodos.value.length);
+  /**
+   * 待办列表的展示顺序：没做完的在前，勾完的沉到后面。
+   * 勾选只是打勾（留在原位下面），要整条消失必须点右上角的叉号——
+   * 这样「我勾了」和「我不要了」是两个动作，误点一下不会把事弄丢。
+   */
+  const todoList = computed(() => {
+    return todos.value
+      .map((t, i) => ({ t, i }))
+      .sort((a, b) => Number(!!a.t.done) - Number(!!b.t.done) || a.i - b.i)
+      .map((x) => x.t);
+  });
+  /** 徽标只数没做完的：勾完了就不该再顶着红点催人 */
+  const todoCount = computed(() => todos.value.filter((t) => !t.done).length);
+  const doneTodoCount = computed(() => todos.value.filter((t) => t.done).length);
   const messageUnread = computed(() =>
     threads.value.reduce((s, t) => s + t.unread, 0),
   );
@@ -117,18 +128,47 @@ export const useNoticeStore = defineStore("notices", () => {
     }
   }
 
+  /**
+   * 勾选待办 = 只打勾，不删除。
+   * 以前勾完就从列表里 splice 掉，用户点一下「事没了」，误点也找不回来。
+   * 现在置 done、留在列表里划横线，要清理得点右侧叉号（removeTodo）。
+   */
   async function finishTodo(id: string) {
     const row = todos.value.find((t) => t.id === id);
     if (!row || row.done) return;
-    row.done = true;                    // 先乐观置灰，接口回来再从列表里摘掉
+    row.done = true;                    // 先乐观打勾，接口回来再对齐后端字段
     try {
-      await api.finishTodo(id);
-      // 勾掉就消失：待办列表是「还欠着的事」，做完了不该继续占位。
-      // 以前只把 done 置 true，模板照样渲染出来划一道横线，看着像没生效。
-      const at = todos.value.findIndex((t) => t.id === id);
-      if (at >= 0) todos.value.splice(at, 1);
+      const res = await api.finishTodo(id);
+      if (res?.todo) Object.assign(row, res.todo);
     } catch {
-      row.done = false;
+      row.done = false;                 // 失败退回未勾，别让界面骗人
+    }
+  }
+
+  /** 勾错了就地取消，不用重新生成一条 */
+  async function reopenTodo(id: string) {
+    const row = todos.value.find((t) => t.id === id);
+    if (!row || !row.done) return;
+    row.done = false;
+    try {
+      const res = await api.reopenTodo(id);
+      if (res?.todo) Object.assign(row, res.todo);
+    } catch {
+      row.done = true;
+    }
+  }
+
+  /** 点右上角叉号才走这里：确认不要了，从列表里真删 */
+  async function removeTodo(id: string) {
+    const at = todos.value.findIndex((t) => t.id === id);
+    if (at < 0) return;
+    const backup = todos.value[at];
+    todos.value.splice(at, 1);          // 乐观移除，行立刻消失
+    try {
+      await api.removeTodo(id);
+    } catch (e) {
+      todos.value.splice(at, 0, backup); // 删失败放回原位
+      throw e;
     }
   }
 
@@ -163,10 +203,11 @@ export const useNoticeStore = defineStore("notices", () => {
   }
 
   return {
-    unread, todos, openTodos, unreadCount, todoCount,
+    unread, todos, todoList, unreadCount, todoCount, doneTodoCount,
     panelOpen, tab,
     threads, activeThread, messageUnread, canMessage, sending,
-    refresh, start, stop, markRead, finishTodo, onArrive, openPanel,
+    refresh, start, stop, markRead, finishTodo, reopenTodo, removeTodo,
+    onArrive, openPanel,
     sendMessage, markThreadRead, refreshMessages,
   };
 });

@@ -54,6 +54,15 @@ class _Store:
                     return row
             return None
 
+    def remove(self, role: str, account: str, item_id: str) -> dict | None:
+        """物理删掉一条（待办打叉才走这里，勾选只是置 done）。"""
+        with self._lock:
+            rows = self._data.get(_key(role, account), [])
+            for i, row in enumerate(rows):
+                if row["id"] == item_id:
+                    return rows.pop(i)
+            return None
+
 
 class NotificationCenter:
     """未读通知。学生端：旷课/缺交/预警/异议回执；导员端：学生异议/约谈提醒。"""
@@ -117,6 +126,14 @@ class TodoCenter:
 
     def finish(self, role: str, account: str, item_id: str) -> dict | None:
         return self._store.patch(role, account, item_id, done=True)
+
+    def unfinish(self, role: str, account: str, item_id: str) -> dict | None:
+        """取消勾选：勾错了还能退回去，不用重新生成一条。"""
+        return self._store.patch(role, account, item_id, done=False)
+
+    def remove(self, role: str, account: str, item_id: str) -> dict | None:
+        """打叉删除（勾选只是 done，删除才真的从列表里拿掉）。"""
+        return self._store.remove(role, account, item_id)
 
     def close_by_meta(self, role: str, account: str, match: dict) -> int:
         """按 meta 字段批量闭环（如异议处理完，导员端对应待办自动完成）。"""

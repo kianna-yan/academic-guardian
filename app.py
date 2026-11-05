@@ -9,11 +9,13 @@ import copy
 import json
 import os
 import queue
+import tempfile
 import threading
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -293,6 +295,11 @@ class ChatIn(BaseModel):
     sid: str | None = None
     message: str = ""
     attachments: list[MediaIn] | None = None
+    # 这一轮是不是点了 Skill（前端把技能名带上来）。
+    # 带了就走技能自己的回答链路：预填的提问不是用户自己组织的话，
+    # 交给意图猜测只会在别的端答成另一件事（导员端点 PPT 拿到学生的补救计划）。
+    skill: str | None = None
+    sub: str | None = None
 
 
 class ConfigIn(BaseModel):
@@ -733,7 +740,8 @@ def chat(body: ChatIn, request: Request):
     agent = _make_agent()
     return agent.answer(role, sid, body.message, CONFIG.get("school"),
                         profile=request.state.profile,
-                        attachments=_media(body))
+                        attachments=_media(body),
+                        skill=(body.skill or None), sub=(body.sub or None))
 
 
 @app.post("/api/asr")
@@ -759,6 +767,145 @@ def media_health():
     from engine import multimodal
 
     return multimodal.health()
+
+
+# ---------------------------------------------------------------------------
+# 输入框「+」里的两个新入口：上传文档 / Skill
+# ---------------------------------------------------------------------------
+class SkillIn(BaseModel):
+    skill: str = "pdf"
+    sid: str | None = None
+    # 二级项：文书的类型（suspend / notice …）、家长的类型（anxious …）
+    sub: str | None = None
+    # 刚发出去的那句话：导员/教务没有固定 sid，要靠它把「给沈一鸣起草」里的名字解析出来
+    note: str | None = None
+    # 刚发出去的那句话：导员/教务没有固定 sid，要靠它把「给沈一鸣起草」里的名字解析出来
+    note: str | None = None
+
+
+@app.get("/api/skills/catalog")
+def skills_catalog(request: Request):
+    """「+ → Skill」的菜单项：按端过滤，提示语也按端给。
+
+    菜单不写死在前端，权限只有这一处；提示语同理——学生口的「补救计划」
+    出现在导员端，就是端与端互相串味的根源。
+    """
+    from engine import skills as skills_mod
+
+    role = (request.state.profile or {}).get("role") or "student"
+    return {"items": skills_mod.catalog(role)}
+
+
+@app.post("/api/skills/export")
+def skills_export(body: SkillIn, request: Request):
+    """技能生成文件：PPT / PDF / Word，以及文书辅助的六类模板。
+
+    学生与家长只能导自己（孩子）的那份；辅导员、教务可以指定 sid。
+    走 POST 而不是 GET：要按当前学情现场渲染，不能被浏览器缓存住旧报告。
+    """
+    from engine import documents, skills as skills_mod
+
+    p = request.state.profile
+    role = p.get("role") or "student"
+    meta = skills_mod.BY_KEY.get(body.skill)
+    if not meta:
+        raise HTTPException(400, "没有这个技能")
+    if role not in (meta.get("roles") or []):
+        raise HTTPException(403, "这个账号没有该技能的权限")
+    if not meta.get("ext"):
+        raise HTTPException(400, "这个技能不产出文件")
+
+    sid = (p.get("sid") or "") if role in ("student", "parent") else (body.sid or p.get("sid"))
+    try:
+        if meta.get("kind") == "draft":
+            # 文书辅助：六类模板现场排版。非申请类的文书不挂学生，
+            # 否则归档的人会以为这是给学生开的。
+            sub = body.sub if body.sub in documents.BY_KEY else documents.KINDS[0]["key"]
+            target = sid if sub in documents.STUDENT_KINDS else None
+            if target is None and sub in documents.STUDENT_KINDS:
+                # 导员/教务没有固定 sid：这一轮是「给沈一鸣起草」，名字在对话里解析出来的。
+                # 优先用这次请求带上来的原话（导出与对话是并行的，读记忆会赶在写入之前），
+                # 解析不出再退回上一轮的记忆；否则回答写着沈一鸣、文件里全是待填。
+                if body.note:
+                    try:
+                        target = _make_agent().resolve_target(body.note, role, None, None)[0]
+                    except Exception:  # noqa: BLE001
+                        target = None
+                if not target:
+                    from engine.memory import memory_key as _mkey
+
+                    hist = MEMORY.history(_mkey(p))
+                    if hist and hist[-1].get("intent") == "doc":
+                        target = hist[-1].get("sid")
+            if target:
+                ENGINE.get(target)
+            ctx = documents.context(ENGINE, target, p, "")
+            data, name, mime = documents.render(sub, ctx)
+        elif not sid:
+            # 导员 / 教务没有"某个学生"的语境，导的是班级·全校那一层
+            if role not in ("counselor", "admin"):
+                raise HTTPException(400, "还没有可以导出的学生")
+            rep = REPORT_STATE["last_report"] or _build_report()
+            data, name, mime = skills_mod.render_class(body.skill, rep, ENGINE)
+        else:
+            ENGINE.get(sid)
+            data, name, mime = skills_mod.render(body.skill, ENGINE, sid)
+    except KeyError:
+        raise HTTPException(404, "学生不存在")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"生成失败：{e}")
+    quoted = quote(name)
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            # 中文文件名走 RFC 5987；再补一个 X-File-Name 给前端直接读，省得解析 header
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+            "X-File-Name": quoted,
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/chat/upload")
+async def chat_upload(request: Request, file: UploadFile = File(...)):
+    """上传文档 → 抽出正文给对话用。
+
+    只做「读成文字」这一件事：文件不落库、不进知识库，请求结束即删临时文件。
+    前端拿到 text 之后当成一个 kind=text 的附件随提问发出，模型看到的就是原文。
+    """
+    from engine import docread
+
+    if not request.state.profile:
+        raise HTTPException(401, "请先登录")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "这个文件是空的")
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(400, "文件超过 20MB，先拆分或压缩一下")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+            f.write(raw)
+            tmp_path = Path(f.name)
+        text, note = docread.read(tmp_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+    if not text:
+        raise HTTPException(400, note or "这个文件里没读到文字，换一份试试")
+    return {
+        "ok": True,
+        "name": file.filename,
+        "chars": len(text),
+        "text": text,
+        "note": note,
+    }
 
 
 @app.get("/api/kb/stats")
@@ -1114,13 +1261,35 @@ def notifications_read(body: ReadIn, request: Request):
 
 @app.post("/api/todos/{tid}/finish")
 def todo_finish(tid: str, request: Request):
-    """勾掉一条待办（本账号自己的）。"""
+    """勾掉一条待办（本账号自己的）。只是置完成，不从列表里删。"""
     p = request.state.profile
     role, account = _nkey(p)
     row = TODOS.finish(role, account, tid)
     if not row:
         raise HTTPException(404, "待办不存在")
     return {"ok": True, "todo": row}
+
+
+@app.post("/api/todos/{tid}/reopen")
+def todo_reopen(tid: str, request: Request):
+    """取消勾选（勾错了退回去）。"""
+    p = request.state.profile
+    role, account = _nkey(p)
+    row = TODOS.unfinish(role, account, tid)
+    if not row:
+        raise HTTPException(404, "待办不存在")
+    return {"ok": True, "todo": row}
+
+
+@app.delete("/api/todos/{tid}")
+def todo_remove(tid: str, request: Request):
+    """待办右侧的叉号：确认不要了才真删。"""
+    p = request.state.profile
+    role, account = _nkey(p)
+    row = TODOS.remove(role, account, tid)
+    if not row:
+        raise HTTPException(404, "待办不存在")
+    return {"ok": True, "removed": tid}
 
 
 @app.post("/api/appeals")
@@ -1426,6 +1595,7 @@ def chat_stream(body: ChatIn, request: Request):
                 result = agent.answer(
                     role, sid, body.message, CONFIG.get("school"),
                     emit=emit, profile=profile, attachments=_media(body),
+                    skill=(body.skill or None), sub=(body.sub or None),
                 )
                 events.put(("final", result))
             except Exception as exc:  # noqa: BLE001

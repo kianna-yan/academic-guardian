@@ -6,7 +6,8 @@
  * 浏览器里有 canvas 和 MediaRecorder，够用了。
  */
 
-export type MediaKind = "image" | "video" | "audio";
+/** text 不是采集出来的，而是「上传文档」解析出的正文，走同一个附件通道 */
+export type MediaKind = "image" | "video" | "audio" | "text";
 
 export interface PickedMedia {
   id: string;
@@ -23,6 +24,8 @@ export interface PickedMedia {
   /** 气泡里显示的小图 */
   thumb?: string;
   size: number;
+  /** kind=text 时抽出来的字数（上传文档用，气泡里显示「约 1200 字」） */
+  chars?: number;
 }
 
 let seq = 0;

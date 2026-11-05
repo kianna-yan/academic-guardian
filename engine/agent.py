@@ -977,7 +977,8 @@ class Agent:
 
     def answer(self, role: str, sid: str | None, message: str, school: str | None = None,
                emit=None, profile: dict | None = None,
-               attachments: list[dict] | None = None) -> dict:
+               attachments: list[dict] | None = None,
+               skill: str | None = None, sub: str | None = None) -> dict:
         """生成回答。
 
         emit: 可选回调 emit(kind, payload)，用于把中间过程推给流式接口。
@@ -1005,6 +1006,17 @@ class Agent:
             thoughts.append(text)
             if emit:
                 emit("thought", {"text": text})
+
+        # ---- 点了 Skill：这一轮交给技能自己回答 ----
+        # 预填的提问不是用户自己组织的话，让 _intent 去打分只会串端：
+        # 学生口吻的「补救计划」在导员端一个关键词都命中不了，最后落进兜底话术。
+        # 演练中的下一句也走这里——那是对家长说的话，不是新提问。
+        from . import skillflow
+
+        routed = skillflow.answer(self, role, sid, message, school, profile, emit,
+                                  skill=skill, sub=sub)
+        if routed:
+            return routed
 
         # ---- 多模态：先把附件认出来，再当成"用户说的话"接进同一条链路 ----
         if attachments:

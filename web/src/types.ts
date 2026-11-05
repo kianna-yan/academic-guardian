@@ -482,6 +482,37 @@ export interface TodoItem {
   meta: Record<string, string>;
 }
 
+/** 输入框「+ → Skill」里的一项。ext 为空表示这类技能不产出文件（图表解读）。 */
+/** 技能的二级项：文书的类型、家长的类型 */
+export interface SkillSub {
+  key: string;
+  name: string;
+  desc: string;
+}
+
+export interface SkillMeta {
+  key: string;
+  name: string;
+  icon: string;
+  desc: string;
+  ext: string | null;
+  hint: string;
+  /** file=出文件 / image=开图片选择 / draft=按模板起草 / roleplay=进入演练 */
+  kind: "file" | "image" | "draft" | "roleplay";
+  /** 合规提示，例如「只起草，不代提交」 */
+  note?: string;
+  subs?: SkillSub[];
+}
+
+/** 上传文档解析结果：正文已经抽成纯文本，前端当 text 附件随提问发出 */
+export interface UploadedDoc {
+  ok: boolean;
+  name: string;
+  chars: number;
+  text: string;
+  note?: string;
+}
+
 export interface AppealItem {
   id: string;
   sid: string;

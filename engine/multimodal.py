@@ -353,7 +353,8 @@ def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list
         elif kind == "text":
             content = (att.get("data") or "").strip()
             if content:
-                blocks.append(f"【用户上传的文本「{name}」】内容：{content[:2000]}")
+                # 上传文档最多送 4000 字进来（docread 已截过），这里别再砍一半
+                blocks.append(f"【用户上传的文本「{name}」】内容：{content[:4000]}")
                 trace.append({"tool": "text", "label": "读文本", "detail": name})
         else:
             blocks.append(f"【用户上传了「{name}」】这类附件暂不支持解析。")

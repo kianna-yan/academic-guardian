@@ -6,3 +6,5 @@ python-pptx>=0.6.23
 python-multipart>=0.0.9
 # 中文分词（知识库检索用）。不装也能跑，会自动退回字符 bigram，只是排序略弱
 jieba>=0.42
+# 上传文档里的 PDF 抽正文（「+ → 上传文档」）。不装也能跑，只是 PDF 会提示解析不了
+pypdfium2>=4.30
