@@ -20,7 +20,7 @@ const props = withDefaults(
 const el = ref<HTMLElement | null>(null);
 
 // 低于 60 的柱子单独标红：这是老师唯一必须当场处理的区间
-const COLOR = ["#b45309", "#d97706", "#e8a33d", "#94a3b8", "#dc2626"];
+const COLOR = ["#16564a", "#a9681f", "#e8a33d", "#94a3b8", "#b3261e"];
 
 const option = computed(() => {
   const rows = props.dist || [];
@@ -45,7 +45,7 @@ const option = computed(() => {
     yAxis: {
       type: "value",
       splitLine: { lineStyle: { color: "#f2e9da" } },
-      axisLabel: { fontSize: 11, color: "#8e7a66" },
+      axisLabel: { fontSize: 11, color: "#7c8175" },
     },
     series: [
       {
@@ -53,7 +53,7 @@ const option = computed(() => {
         barWidth: "46%",
         data: rows.map((r, i) => ({
           value: r.count,
-          itemStyle: { color: COLOR[i] ?? "#d97706", borderRadius: [5, 5, 0, 0] },
+          itemStyle: { color: COLOR[i] ?? "#a9681f", borderRadius: [5, 5, 0, 0] },
         })),
         label: { show: true, position: "top", fontSize: 11, color: "#5d4b3a" },
       },

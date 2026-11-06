@@ -445,7 +445,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   gap: 1px;
   padding: 8px 12px;
   border-radius: 10px;
-  background: #faf6ee;
+  background: #f8f5ee;
 }
 .hero-cell b {
   font-size: 24px;
@@ -574,7 +574,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   background: var(--red-soft);
 }
 .tag-mini.watch {
-  color: #b45309;
+  color: #16564a;
   border-color: rgba(217, 119, 6, 0.35);
   background: var(--amber-soft);
 }
@@ -633,19 +633,19 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   padding: 12px 14px;
   border-radius: 11px;
   border: 1px solid var(--line);
-  background: #faf6ee;
+  background: #f8f5ee;
 }
 .verdict.risk {
-  background: linear-gradient(180deg, #fef2f2, #fff8f6);
+  background: linear-gradient(180deg, #f9e8e5, #fff8f6);
   border-color: #f6d5d1;
 }
 .verdict.watch {
-  background: linear-gradient(180deg, #fffbeb, #fffdf6);
+  background: linear-gradient(180deg, #f9efdf, #fffdf6);
   border-color: #f7e4bf;
 }
 .verdict.ok,
 .verdict.great {
-  background: linear-gradient(180deg, #ecfdf5, #f7fdf9);
+  background: linear-gradient(180deg, #e2efe9, #f7fdf9);
   border-color: #cfe9dd;
 }
 .v-left {
@@ -678,7 +678,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   color: var(--red);
 }
 .verdict.watch .v-mid strong {
-  color: #b45309;
+  color: #16564a;
 }
 .verdict.ok .v-mid strong,
 .verdict.great .v-mid strong {
@@ -812,7 +812,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   appearance: none;
   height: 6px;
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--cc, #d97706) 0%, var(--cc, #d97706) var(--p, 0%), #eee5d5 var(--p, 0%), #eee5d5 100%);
+  background: linear-gradient(90deg, var(--cc, #a9681f) 0%, var(--cc, #a9681f) var(--p, 0%), #eee5d5 var(--p, 0%), #eee5d5 100%);
   outline: none;
 }
 .range::-webkit-slider-thumb {
@@ -821,7 +821,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   height: 15px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid var(--cc, #d97706);
+  border: 2px solid var(--cc, #a9681f);
   box-shadow: 0 1px 3px rgba(59, 46, 36, 0.25);
   cursor: grab;
 }
@@ -830,7 +830,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
   height: 14px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid var(--cc, #d97706);
+  border: 2px solid var(--cc, #a9681f);
   cursor: grab;
 }
 .score-input {
@@ -910,7 +910,7 @@ const pct = (v: number) => `${Math.max(0, Math.min(100, v))}%`;
 .method-item {
   padding: 9px 11px;
   border-radius: 9px;
-  background: #faf6ee;
+  background: #f8f5ee;
 }
 .method-item b {
   font-size: 12px;

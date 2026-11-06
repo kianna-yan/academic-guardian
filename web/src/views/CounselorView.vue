@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
-import ChatHome from "@/components/ChatHome.vue";
+import PortalHome from "@/components/portal/PortalHome.vue";
 import CounselorForest from "@/components/CounselorForest.vue";
-import DashNav from "@/components/DashNav.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
 import RegionBand from "@/components/RegionBand.vue";
 import StatGrid from "@/components/StatGrid.vue";
@@ -17,6 +17,9 @@ import type { Citation, RosterRow } from "@/types";
 
 const app = useAppStore();
 const chat = useChatStore();
+const route = useRoute();
+/** 无 section = 门户首屏；有 section = 只渲染那一块（风险名单 / 智慧森林） */
+const sec = computed(() => (route.meta.section as string) || "");
 // 手机屏只留关键列，其余列在抽屉里看
 const narrow = useNarrow();
 
@@ -117,12 +120,11 @@ async function openLetter(type: "student" | "counselor") {
 </script>
 
 <template>
-  <!-- 对话是主入口：进来就是整页 AI 问答，预警名单按键前往 -->
-  <ChatHome v-if="chat.homeMode === 'chat'" role="counselor" :sid="null" />
+  <!-- 首屏图形门户：清单上的每一条在画布上是一个可点的形状，AI 收在最下方那条输入条里 -->
+  <PortalHome v-if="!sec" role="counselor" :sid="null" />
 
   <template v-else>
-    <DashNav />
-
+  <template v-if="sec === 'roster'">
     <div class="view-actions">
       <button class="btn" @click="downloadDoc('/api/export/interventions')">导出干预台账 Word</button>
       <button class="btn" @click="downloadDoc('/api/export/daily-report')">今日预警日报</button>
@@ -266,15 +268,18 @@ async function openLetter(type: "student" | "counselor") {
     </div>
   </div>
 
+  </template>
+
   <StudentDrawer v-model="drawer.open" :sid="drawer.sid" @letter="openLetter" />
 
-  <!-- 智慧森林：每个学生一棵树，每班一片森林。放在名单之后，
-       看完「谁最该找」再看「这个班整体长成什么样」。 -->
+  <!-- 智慧森林：每个学生一棵树，每班一片森林。名单看「谁最该找」，这里看「这个班整体长成什么样」。 -->
+  <template v-if="sec === 'forest'">
   <RegionBand id="forest" no="02" title="智慧森林" tone="learn"
     desc="每个学生一棵树，按风险分形态；点任意一棵树查看该生详情与存在的问题" />
   <div class="card">
     <CounselorForest :rows="rows" @select="openStudentBySid" />
   </div>
+  </template>
 
   <LetterDialog
     v-model="dialog.open"

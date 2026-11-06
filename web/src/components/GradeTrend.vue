@@ -84,7 +84,7 @@ const option = computed(() => {
       right: 0,
       itemWidth: 12,
       itemHeight: 2,
-      textStyle: { fontSize: 11, color: "#8e7a66" },
+      textStyle: { fontSize: 11, color: "#7c8175" },
       data: legendData,
     },
     tooltip: {
@@ -98,14 +98,14 @@ const option = computed(() => {
         const t = list[i];
         if (!t) return "";
         const rows = [
-          `<b>${t.label}</b> <span style="color:#c2a98d">${t.term}</span>`,
+          `<b>${t.label}</b> <span style="color:#c7bfab">${t.term}</span>`,
           `均分 <b>${t.avg}</b>　班级 ${t.cohort_avg ?? "-"}`,
           `GPA ${t.gpa ?? "-"}　班级 ${t.cohort_gpa ?? "-"}`,
           `班级排名 <b>${t.rank ?? "-"}</b> / ${t.rank_total ?? "-"}`,
           `学期学分 ${t.credits}${t.failed ? `　挂科 ${t.failed} 学分` : ""}`,
         ];
         if (t.status === "ongoing") {
-          rows.push(`<span style="color:#b45309">${t.note}</span>`);
+          rows.push(`<span style="color:#16564a">${t.note}</span>`);
         }
         return rows.join("<br/>");
       },
@@ -130,10 +130,10 @@ const option = computed(() => {
       inverse: isRank.value, // 排名越小越好，轴要反过来
       scale: true,
       name: isRank.value ? "名次" : "分数",
-      nameTextStyle: { fontSize: 10.5, color: "#c2a98d", align: "right" },
+      nameTextStyle: { fontSize: 10.5, color: "#c7bfab", align: "right" },
       nameGap: 10,
-      axisLabel: { fontSize: 11, color: "#c2a98d" },
-      splitLine: { lineStyle: { color: "#f7f0e5" } },
+      axisLabel: { fontSize: 11, color: "#c7bfab" },
+      splitLine: { lineStyle: { color: "#f4f0e6" } },
     },
     series: [
       {
@@ -142,8 +142,8 @@ const option = computed(() => {
         smooth: 0.35,
         symbol: "circle",
         symbolSize: 7,
-        lineStyle: { width: 2.4, color: "#b45309" },
-        itemStyle: { color: "#b45309" },
+        lineStyle: { width: 2.4, color: "#16564a" },
+        itemStyle: { color: "#16564a" },
         areaStyle: {
           color: {
             type: "linear",
@@ -152,8 +152,8 @@ const option = computed(() => {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: "rgba(29,78,216,.16)" },
-              { offset: 1, color: "rgba(29,78,216,0)" },
+              { offset: 0, color: "rgba(22,86,74,.14)" },
+              { offset: 1, color: "rgba(22,86,74,0)" },
             ],
           },
         },
@@ -167,7 +167,7 @@ const option = computed(() => {
                 formatter: "及格线 60",
                 position: "insideEndTop",
                 fontSize: 10,
-                color: "#b45309",
+                color: "#16564a",
               },
               data: [{ yAxis: 60 }],
             }
@@ -178,8 +178,8 @@ const option = computed(() => {
         type: "line",
         smooth: 0.35,
         symbol: "none",
-        lineStyle: { width: 1.4, color: "#b09b85", type: "dashed" },
-        itemStyle: { color: "#b09b85" },
+        lineStyle: { width: 1.4, color: "#7c8175", type: "dashed" },
+        itemStyle: { color: "#7c8175" },
         data: showMedian || !isRank.value ? ref : [],
       },
       {
@@ -188,8 +188,8 @@ const option = computed(() => {
         smooth: 0.35,
         symbol: "emptyCircle",
         symbolSize: 8,
-        lineStyle: { width: 2.4, color: "#b45309", type: "dashed" },
-        itemStyle: { color: "#fff", borderColor: "#b45309", borderWidth: 2 },
+        lineStyle: { width: 2.4, color: "#16564a", type: "dashed" },
+        itemStyle: { color: "#fff", borderColor: "#16564a", borderWidth: 2 },
         data: tail,
         tooltip: { show: false },
         silent: true,
@@ -268,8 +268,8 @@ useChart(el, option);
   cursor: pointer;
 }
 .gt-tab.on {
-  background: var(--brand-soft, #fdf1de);
-  color: var(--brand, #b45309);
+  background: var(--brand-soft, #e3ece7);
+  color: var(--brand, #16564a);
   font-weight: 500;
 }
 .gt-foot {
@@ -287,12 +287,12 @@ useChart(el, option);
   font-size: 11.5px;
 }
 .gt-chip.bad {
-  background: var(--red-soft, #fef2f2);
-  color: var(--red, #dc2626);
+  background: var(--red-soft, #f9e8e5);
+  color: var(--red, #b3261e);
 }
 .gt-chip.good {
-  background: var(--green-soft, #ecfdf5);
-  color: var(--green, #047857);
+  background: var(--green-soft, #e2efe9);
+  color: var(--green, #17604f);
 }
 .gt-chip.flat {
   background: var(--line);
@@ -302,10 +302,10 @@ useChart(el, option);
   font-variant-numeric: tabular-nums;
 }
 .gt-gap b.good {
-  color: var(--green, #047857);
+  color: var(--green, #17604f);
 }
 .gt-gap b.bad {
-  color: var(--red, #dc2626);
+  color: var(--red, #b3261e);
 }
 .gt-note {
   margin-left: auto;

@@ -295,7 +295,7 @@ async function save() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d9c9b3;
+  background: #c7bfab;
   margin-bottom: 4px;
 }
 .state-btn b {
@@ -311,28 +311,28 @@ async function save() {
   border-color: var(--line-strong);
 }
 .state-btn.full.on {
-  border-color: #047857;
-  background: #ecfdf5;
+  border-color: #17604f;
+  background: #e2efe9;
   box-shadow: 0 0 0 2px rgba(4, 120, 87, 0.1);
 }
 .state-btn.full.on i {
-  background: #047857;
+  background: #17604f;
 }
 .state-btn.fuzzy.on {
-  border-color: #d97706;
-  background: #fffbeb;
+  border-color: #a9681f;
+  background: #f9efdf;
   box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12);
 }
 .state-btn.fuzzy.on i {
-  background: #d97706;
+  background: #a9681f;
 }
 .state-btn.lost.on {
-  border-color: #dc2626;
-  background: #fef2f2;
+  border-color: #b3261e;
+  background: #f9e8e5;
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
 }
 .state-btn.lost.on i {
-  background: #dc2626;
+  background: #b3261e;
 }
 .opt-row,
 .tag-row {

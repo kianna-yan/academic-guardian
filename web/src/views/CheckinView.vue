@@ -394,16 +394,16 @@ function mdShort(iso: string) {
   color: var(--brand);
 }
 .pill.full {
-  background: #ecfdf5;
-  color: #047857;
+  background: #e2efe9;
+  color: #17604f;
 }
 .pill.fuzzy {
-  background: #fffbeb;
-  color: #b45309;
+  background: #f9efdf;
+  color: #16564a;
 }
 .pill.lost {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f9e8e5;
+  color: #b3261e;
 }
 
 .empty-card {
@@ -449,16 +449,16 @@ function mdShort(iso: string) {
   flex-direction: column;
   gap: 1px;
   padding-left: 10px;
-  border-left: 3px solid #d9c9b3;
+  border-left: 3px solid #c7bfab;
 }
 .tl-row.full .tl-date {
-  border-left-color: #047857;
+  border-left-color: #17604f;
 }
 .tl-row.fuzzy .tl-date {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
 }
 .tl-row.lost .tl-date {
-  border-left-color: #dc2626;
+  border-left-color: #b3261e;
 }
 .tl-date b {
   font-size: 12.5px;
@@ -479,7 +479,7 @@ function mdShort(iso: string) {
 }
 .tl-break {
   font-size: 11px;
-  color: #b45309;
+  color: #16564a;
 }
 .tl-meta {
   display: flex;
@@ -490,7 +490,7 @@ function mdShort(iso: string) {
   color: var(--text-2);
 }
 .tl-point {
-  color: #b45309;
+  color: #16564a;
 }
 .tl-note {
   margin: 5px 0 0;

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { api, downloadDoc } from "@/api/client";
-import ChatHome from "@/components/ChatHome.vue";
+import PortalHome from "@/components/portal/PortalHome.vue";
 import ClassBars from "@/components/ClassBars.vue";
-import DashNav from "@/components/DashNav.vue";
 import DistDonut from "@/components/DistDonut.vue";
 import HwFlow from "@/components/HwFlow.vue";
 import ScoreBands from "@/components/ScoreBands.vue";
@@ -36,6 +36,9 @@ import type {
  */
 const auth = useAuthStore();
 const chat = useChatStore();
+const route = useRoute();
+/** 无 section = 门户首屏；有 section = 只渲染课堂学情这一块 */
+const sec = computed(() => (route.meta.section as string) || "");
 const narrow = useNarrow();
 
 const loading = ref(true);
@@ -383,12 +386,10 @@ const profile = computed(() => room.value?.teacher || null);
 </script>
 
 <template>
-  <!-- 对话是主入口：进来先跟教学助手说话，看板按键过去 -->
-  <ChatHome v-if="chat.homeMode === 'chat'" role="teacher" :sid="null" />
+  <!-- 首屏图形门户：清单上的每一条排成画布节点，AI 收在最下面那条输入条里 -->
+  <PortalHome v-if="!sec" role="teacher" :sid="null" />
 
   <template v-else>
-    <DashNav />
-
     <div v-if="loading" class="card empty"><span class="spinner"></span> 正在汇总课堂数据…</div>
     <div v-else-if="error" class="card empty">
       {{ error }}
@@ -572,9 +573,9 @@ const profile = computed(() => room.value?.teacher || null);
           <div class="card-head"><h3>课堂风险构成</h3></div>
           <DistDonut :dist="course.risk" />
           <ul class="risk-legend">
-            <li><i style="background: #dc2626"></i>红色预警 <b>{{ course.risk.red }}</b> 人</li>
-            <li><i style="background: #d97706"></i>黄色关注 <b>{{ course.risk.yellow }}</b> 人</li>
-            <li><i style="background: #047857"></i>状态正常 <b>{{ course.risk.green }}</b> 人</li>
+            <li><i style="background: #b3261e"></i>红色预警 <b>{{ course.risk.red }}</b> 人</li>
+            <li><i style="background: #a9681f"></i>黄色关注 <b>{{ course.risk.yellow }}</b> 人</li>
+            <li><i style="background: #17604f"></i>状态正常 <b>{{ course.risk.green }}</b> 人</li>
           </ul>
           <p class="tiny muted note">
             风险分跨六门课汇总，课堂只是其中一部分；红色学生建议反馈辅导员，
@@ -748,7 +749,7 @@ const profile = computed(() => room.value?.teacher || null);
   font-size: 22px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(135deg, #d97706, #b45309);
+  background: linear-gradient(135deg, #a9681f, #16564a);
   flex: none;
 }
 .who h2 {
@@ -780,7 +781,7 @@ const profile = computed(() => room.value?.teacher || null);
 .chip-i {
   font-size: 11.5px;
   color: var(--text-2);
-  background: #faf6ee;
+  background: #f8f5ee;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 2px 7px;
@@ -910,7 +911,7 @@ const profile = computed(() => room.value?.teacher || null);
 }
 .name-chip {
   border: 1px solid var(--line);
-  background: #faf6ee;
+  background: #f8f5ee;
   border-radius: 999px;
   padding: 1px 9px;
   font-size: 11.5px;
@@ -965,20 +966,20 @@ const profile = computed(() => room.value?.teacher || null);
   margin: 14px 0 -2px;
   padding: 7px 12px;
   border-radius: 9px;
-  background: var(--brand-soft, #fdf1de);
+  background: var(--brand-soft, #e3ece7);
   border: 1px solid #f0d9b5;
   font-size: 12.5px;
   color: var(--text-2, #5d4b3a);
 }
 .scope-bar b {
-  color: var(--brand, #b45309);
+  color: var(--brand, #16564a);
   font-weight: 600;
 }
 .scope-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--brand, #b45309);
+  background: var(--brand, #16564a);
   flex: none;
 }
 
@@ -1175,9 +1176,9 @@ const profile = computed(() => room.value?.teacher || null);
   border-radius: 50%;
   display: inline-block;
 }
-.dot-red { background: #dc2626; }
-.dot-yel { background: #d97706; }
-.dot-grn { background: #047857; }
+.dot-red { background: #b3261e; }
+.dot-yel { background: #a9681f; }
+.dot-grn { background: #17604f; }
 
 /* 名单标题里的班级标签 */
 .cls-tag {

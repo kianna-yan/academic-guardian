@@ -106,8 +106,8 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
             <!-- green：茂盛圆冠，三层叠加 + 高光 + 小果实 -->
             <template v-if="t.level === 'green'">
               <circle cx="32" cy="33" r="19" fill="#15803d" />
-              <circle cx="22" cy="30" r="11.5" fill="#16a34a" />
-              <circle cx="42" cy="29" r="10.5" fill="#16a34a" />
+              <circle cx="22" cy="30" r="11.5" fill="#17604f" />
+              <circle cx="42" cy="29" r="10.5" fill="#17604f" />
               <circle cx="32" cy="21" r="12" fill="#22c55e" />
               <circle cx="25" cy="25" r="7" fill="#4ade80" opacity="0.9" />
               <circle cx="39" cy="35" r="6" fill="#4ade80" opacity="0.45" />
@@ -121,7 +121,7 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
             <!-- yellow：黄叶树，冠形略散 + 飘落叶片 -->
             <template v-else-if="t.level === 'yellow'">
               <circle cx="32" cy="34" r="18.5" fill="#c2740a" />
-              <circle cx="23" cy="30" r="11" fill="#d97706" />
+              <circle cx="23" cy="30" r="11" fill="#a9681f" />
               <circle cx="41" cy="29" r="10" fill="#e8890c" />
               <circle cx="32" cy="22" r="11.5" fill="#f59e0b" />
               <circle cx="26" cy="26" r="6.5" fill="#fbbf24" opacity="0.9" />
@@ -140,14 +140,14 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
               <path d="M32 31 L39 17" stroke="#7a5632" stroke-width="2.2" stroke-linecap="round" />
               <path d="M20 28 L14 21" stroke="#7a5632" stroke-width="1.7" stroke-linecap="round" />
               <path d="M44 26 L50 20" stroke="#7a5632" stroke-width="1.7" stroke-linecap="round" />
-              <circle cx="20" cy="28" r="3.4" fill="#dc2626" />
+              <circle cx="20" cy="28" r="3.4" fill="#b3261e" />
               <circle cx="19.2" cy="27" r="1.3" fill="#fca5a5" opacity="0.85" />
-              <circle cx="44" cy="26" r="3.2" fill="#dc2626" />
+              <circle cx="44" cy="26" r="3.2" fill="#b3261e" />
               <circle cx="43.3" cy="25" r="1.2" fill="#fca5a5" opacity="0.85" />
               <circle cx="32" cy="31" r="3.6" fill="#ef4444" />
               <circle cx="31.2" cy="30" r="1.4" fill="#fecaca" opacity="0.9" />
               <circle cx="26" cy="18" r="2.4" fill="#ef4444" opacity="0.9" />
-              <path d="M23 63 q3 -2.5 6 0 q-3 3 -6 0" fill="#b45309" opacity="0.5" />
+              <path d="M23 63 q3 -2.5 6 0 q-3 3 -6 0" fill="#16564a" opacity="0.5" />
             </template>
           </svg>
           <div class="tree-meta">
@@ -220,9 +220,9 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
   border-radius: 50%;
   flex: none;
 }
-.stat-pill.green i { background: #16a34a; }
-.stat-pill.yellow i { background: #d97706; }
-.stat-pill.red i { background: #dc2626; }
+.stat-pill.green i { background: #17604f; }
+.stat-pill.yellow i { background: #a9681f; }
+.stat-pill.red i { background: #b3261e; }
 .stat-health {
   font-size: 11.5px;
   color: var(--muted);
@@ -259,7 +259,7 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 .tree:focus-visible {
-  outline: 2px solid var(--brand, #b45309);
+  outline: 2px solid var(--brand, #16564a);
   outline-offset: 2px;
 }
 .tree-svg {
@@ -291,16 +291,16 @@ const LEVEL_LABEL = { red: "红色预警", yellow: "黄色关注", green: "状�
   font-weight: 600;
 }
 .tree-score.green {
-  color: #047857;
-  background: #ecfdf5;
+  color: #17604f;
+  background: #e2efe9;
 }
 .tree-score.yellow {
-  color: #b45309;
-  background: #fffbeb;
+  color: #16564a;
+  background: #f9efdf;
 }
 .tree-score.red {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: #9c231c;
+  background: #f9e8e5;
 }
 
 @media (max-width: 760px) {

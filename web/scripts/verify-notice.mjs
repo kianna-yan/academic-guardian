@@ -72,9 +72,10 @@ await page.screenshot({ path: `${OUT}/2-closed.png` });
 /* 4. 再开一次，点左侧导航关闭 */
 await clickAt(bell);
 ok("再次打开", await open());
-await clickAt(".mod-item", 0.5, 0.5);
+// 侧栏已撤掉，点门户画布左上角（离面板很远、也不在节点上）来验证「点框外关闭」
+await clickAt(".portal", 0.03, 0.04);
 await sleep(400);
-ok("点框外（侧栏菜单）关闭", !(await open()));
+ok("点框外（门户画布）关闭", !(await open()));
 
 /* 5. Esc 关闭 */
 await clickAt(bell);

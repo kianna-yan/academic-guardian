@@ -333,16 +333,16 @@ function dayNumber(iso: string) {
   display: inline-block;
 }
 .dot.full {
-  background: #047857;
+  background: #17604f;
 }
 .dot.fuzzy {
-  background: #d97706;
+  background: #a9681f;
 }
 .dot.lost {
-  background: #dc2626;
+  background: #b3261e;
 }
 .dot.none {
-  background: #d9c9b3;
+  background: #c7bfab;
 }
 
 .tt-scroll {
@@ -372,7 +372,7 @@ function dayNumber(iso: string) {
   justify-content: center;
   gap: 2px;
   border-radius: 8px;
-  background: #faf6ee;
+  background: #f8f5ee;
   position: relative;
   padding: 6px 6px 7px;
 }
@@ -397,7 +397,7 @@ function dayNumber(iso: string) {
   white-space: nowrap;
 }
 .gh.day.today {
-  background: #fdf1de;
+  background: #e3ece7;
 }
 .today-tag {
   font-size: 9.5px;
@@ -414,7 +414,7 @@ function dayNumber(iso: string) {
   place-items: center;
   font-size: 11px;
   color: var(--muted);
-  background: #faf6ee;
+  background: #f8f5ee;
   border-radius: 8px;
   padding: 6px 2px;
   letter-spacing: 0.2px;
@@ -440,7 +440,7 @@ function dayNumber(iso: string) {
   padding: 7px 9px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  border-left: 3px solid #d9c9b3;
+  border-left: 3px solid #c7bfab;
   background: #fff;
   text-align: left;
   transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
@@ -450,15 +450,15 @@ function dayNumber(iso: string) {
   transform: translateY(-1px);
 }
 .lesson.full {
-  border-left-color: #047857;
+  border-left-color: #17604f;
   background: linear-gradient(180deg, #f6fefb, #fff);
 }
 .lesson.fuzzy {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
   background: linear-gradient(180deg, #fffdf5, #fff);
 }
 .lesson.lost {
-  border-left-color: #dc2626;
+  border-left-color: #b3261e;
   background: linear-gradient(180deg, #fff7f7, #fff);
 }
 .lesson.future {
@@ -488,16 +488,16 @@ function dayNumber(iso: string) {
   white-space: nowrap;
 }
 .lesson-state.full {
-  background: #ecfdf5;
-  color: #047857;
+  background: #e2efe9;
+  color: #17604f;
 }
 .lesson-state.fuzzy {
-  background: #fffbeb;
-  color: #b45309;
+  background: #f9efdf;
+  color: #16564a;
 }
 .lesson-state.lost {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f9e8e5;
+  color: #b3261e;
 }
 .lesson-meta {
   display: flex;
@@ -509,7 +509,7 @@ function dayNumber(iso: string) {
 }
 .lesson-point {
   font-size: 10.5px;
-  color: #b45309;
+  color: #16564a;
   line-height: 1.45;
 }
 .lesson-cta {
@@ -531,7 +531,7 @@ function dayNumber(iso: string) {
 .week-switch {
   display: flex;
   gap: 4px;
-  background: #faf6ee;
+  background: #f8f5ee;
   padding: 2px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -586,7 +586,7 @@ function dayNumber(iso: string) {
   gap: 12px;
   padding: 9px 12px;
   border: 1px solid var(--line);
-  border-left: 3px solid #d9c9b3;
+  border-left: 3px solid #c7bfab;
   border-radius: 10px;
   background: #fff;
   text-align: left;
@@ -601,13 +601,13 @@ function dayNumber(iso: string) {
   background: #fffdf9;
 }
 .today-item.full {
-  border-left-color: #047857;
+  border-left-color: #17604f;
 }
 .today-item.fuzzy {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
 }
 .today-item.lost {
-  border-left-color: #dc2626;
+  border-left-color: #b3261e;
 }
 .ti-when,
 .ti-what,
@@ -638,16 +638,16 @@ function dayNumber(iso: string) {
   white-space: nowrap;
 }
 .pill.full {
-  background: #ecfdf5;
-  color: #047857;
+  background: #e2efe9;
+  color: #17604f;
 }
 .pill.fuzzy {
-  background: #fffbeb;
-  color: #b45309;
+  background: #f9efdf;
+  color: #16564a;
 }
 .pill.lost {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f9e8e5;
+  color: #b3261e;
 }
 .pill.warn {
   background: var(--brand-soft);

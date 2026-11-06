@@ -7,10 +7,10 @@ const props = withDefaults(defineProps<{ score: number; level: Level; size?: num
   size: 152,
 });
 
-const LEVEL_COLOR: Record<Level, string> = { red: "#dc2626", yellow: "#d97706", green: "#047857" };
+const LEVEL_COLOR: Record<Level, string> = { red: "#b3261e", yellow: "#a9681f", green: "#17604f" };
 
 const el = ref<HTMLElement | null>(null);
-const color = computed(() => LEVEL_COLOR[props.level] ?? "#b45309");
+const color = computed(() => LEVEL_COLOR[props.level] ?? "#16564a");
 const value = computed(() => Math.max(0, Math.min(100, Number(props.score) || 0)));
 
 const option = computed(() => ({

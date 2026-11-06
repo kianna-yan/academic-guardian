@@ -1,0 +1,22 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8600";
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "student", account: "20240067", password: "0000" }) });
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox", "--proxy-server=direct://", "--proxy-bypass-list=*"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), t);
+await p.goto(`${BASE}/student`, { waitUntil: "networkidle2" });
+await new Promise((s) => setTimeout(s, 2600));
+const info = await p.evaluate(() => {
+  const el = document.querySelector('.pt-node[data-node="chat"]');
+  const poly = el.querySelector("polygon");
+  const r = el.getBoundingClientRect();
+  const sh = el.querySelector(".nd-shape").getBoundingClientRect();
+  return { pts: poly.getAttribute("points"), n: poly.getAttribute("points").trim().split(/\s+/).length, nodeBox: [r.x, r.y, r.width, r.height], shapeBox: [sh.x, sh.y, sh.width, sh.height], transform: getComputedStyle(el.querySelector(".nd-shape")).transform, cls: el.className };
+});
+console.log(JSON.stringify(info));
+const box = info.shapeBox;
+await p.screenshot({ path: "C:/tmp/same_page.png", clip: { x: box[0] - 14, y: box[1] - 14, width: box[2] + 28, height: box[3] + 28 } });
+await b.close();

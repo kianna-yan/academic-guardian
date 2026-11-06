@@ -52,6 +52,9 @@ await page.evaluate((t) => {
 }, auth.token);
 await page.goto(`${BASE}/student`, { waitUntil: "networkidle2" });
 await sleep(2600);
+// 首屏是图形门户，先把底部 AI 抽屉点开
+await (await page.$('[data-test="ai-dock"]'))?.click();
+await sleep(1000);
 
 await page.click(".ch-plus");
 await sleep(400);

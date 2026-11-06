@@ -63,6 +63,12 @@ async function open(role, path, token) {
   }, token);
   await page.goto(`${BASE}/${path}`, { waitUntil: "networkidle2" });
   await sleep(2600);
+  // 新版首屏是图形门户，AI 收在底部那条输入条里：先点开抽屉，技能菜单才在 DOM 里
+  const dock = await page.$('[data-test="ai-dock"]');
+  if (dock) {
+    await dock.click();
+    await sleep(1000);
+  }
   return { page, errors };
 }
 

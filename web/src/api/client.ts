@@ -12,6 +12,7 @@ import type {
   CurriculumImportResult,
   MessageItem,
   MessageThread,
+  MessageMedia,
   CurriculumPayload,
   ImportResult,
   Intervention,
@@ -21,6 +22,7 @@ import type {
   NoticeItem,
   NoticePayload,
   Overview,
+  PortalSummary,
   Role,
   RosterRow,
   SimPayload,
@@ -190,6 +192,8 @@ export const api = {
   importStudents: (text: string) => post<ImportResult>("/auth/import-students", { text }),
   meta: () => get<Meta>("/meta"),
   overview: () => get<Overview>("/overview"),
+  /** 门户左侧栏：三个数字 + 三条焦点 */
+  portalSummary: () => get<PortalSummary>("/portal/summary"),
   students: (params: { class_name?: string; level?: string; limit?: number } = {}) =>
     get<{ total: number; rows: RosterRow[] }>("/students", { params }),
   student: (sid: string) => get<StudentDetail>(`/students/${sid}`),
@@ -274,8 +278,8 @@ export const api = {
     post<{ ok: boolean; appeal: AppealItem }>(`/appeals/${id}/resolve`, body),
   // 家长端 ↔ 辅导员端 双向消息
   messages: () => get<{ threads: MessageThread[]; unread: number }>("/messages"),
-  sendMessage: (sid: string, text: string) =>
-    post<{ ok: boolean; message: MessageItem }>("/messages/send", { sid, text }),
+  sendMessage: (sid: string, text: string, media?: MessageMedia[]) =>
+    post<{ ok: boolean; message: MessageItem }>("/messages/send", { sid, text, media: media || [] }),
   markMessagesRead: (thread_id: string) =>
     post<{ ok: boolean; marked: number }>("/messages/read", { thread_id }),
 

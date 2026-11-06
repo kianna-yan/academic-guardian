@@ -225,7 +225,7 @@ function askAI() {
   font-size: 22px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(135deg, #d97706, #b45309);
+  background: linear-gradient(135deg, #a9681f, #16564a);
   flex: none;
 }
 .ts-id h3 {
@@ -242,7 +242,7 @@ function askAI() {
   margin-bottom: 12px;
 }
 .ts-facts .f {
-  background: #faf6ee;
+  background: #f8f5ee;
   border-radius: 9px;
   padding: 8px 6px;
   text-align: center;
@@ -301,10 +301,10 @@ function askAI() {
   border-bottom: 0;
 }
 .att-row[data-st="absent"] {
-  background: #fef2f2;
+  background: #f9e8e5;
 }
 .att-row[data-st="late"] {
-  background: #fffbeb;
+  background: #f9efdf;
 }
 .att-week {
   font-weight: 500;
@@ -366,7 +366,7 @@ function askAI() {
 .more {
   width: 100%;
   border: 0;
-  background: #faf6ee;
+  background: #f8f5ee;
   color: var(--brand);
   font-size: 12px;
   padding: 7px;
@@ -393,7 +393,7 @@ function askAI() {
   font-size: 12.5px;
   line-height: 1.7;
   color: var(--text-2);
-  background: #faf6ee;
+  background: #f8f5ee;
   border-radius: 8px;
   padding: 9px 10px;
 }

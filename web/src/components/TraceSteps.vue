@@ -120,7 +120,7 @@ const channelName = computed(() => {
 }
 .trace-step em {
   font-style: normal;
-  color: #b09b85;
+  color: #7c8175;
   font-size: 10px;
   margin-left: 2px;
 }
@@ -201,7 +201,7 @@ const channelName = computed(() => {
 .rag-rank {
   flex: 0 0 auto;
   font-family: ui-monospace, monospace;
-  color: #b09b85;
+  color: #7c8175;
 }
 .rag-path {
   flex: 1;
@@ -218,7 +218,7 @@ const channelName = computed(() => {
 }
 .rag-why {
   flex: 0 0 auto;
-  color: #b09b85;
+  color: #7c8175;
 }
 .rag-terms,
 .rag-empty {

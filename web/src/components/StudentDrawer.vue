@@ -260,7 +260,7 @@ async function addNote() {
 }
 .ask-ai {
   border: 1px solid #f0d9b5;
-  background: #fdf1de;
+  background: #e3ece7;
   color: #4338ca;
   font-size: 11px;
   font-weight: 600;

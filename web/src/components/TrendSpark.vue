@@ -35,7 +35,7 @@ const dir = computed(() => {
 });
 
 const color = computed(
-  () => ({ up: "var(--green, #047857)", down: "var(--red, #dc2626)", flat: "#b09b85" })[dir.value],
+  () => ({ up: "var(--green, #17604f)", down: "var(--red, #b3261e)", flat: "#7c8175" })[dir.value],
 );
 
 const geom = computed(() => {

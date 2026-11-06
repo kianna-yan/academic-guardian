@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api } from "@/api/client";
-import type { MessageThread, NoticeItem, TodoItem } from "@/types";
+import type { MessageMedia, MessageThread, NoticeItem, TodoItem } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 
 const POLL_MS = 25_000;
@@ -172,11 +172,11 @@ export const useNoticeStore = defineStore("notices", () => {
     }
   }
 
-  async function sendMessage(sid: string, text: string) {
-    if (!text.trim()) return;
+  async function sendMessage(sid: string, text: string, media: MessageMedia[] = []) {
+    if (!text.trim() && !media.length) return;
     sending.value = true;
     try {
-      await api.sendMessage(sid, text);
+      await api.sendMessage(sid, text, media);
       await refreshMessages(true);
     } finally {
       sending.value = false;

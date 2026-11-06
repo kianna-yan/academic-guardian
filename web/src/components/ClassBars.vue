@@ -49,7 +49,7 @@ const option = computed(() => {
           itemStyle: {
             borderRadius: 5,
             // 低于本课均分的班用暖红，高于的用绿——老师只需要一眼看到落后的
-            color: r.mid_avg < props.courseAvg ? "#d97706" : "#047857",
+            color: r.mid_avg < props.courseAvg ? "#a9681f" : "#17604f",
             opacity: r.mid_avg < props.courseAvg ? 0.9 : 0.75,
           },
         })),
@@ -63,8 +63,8 @@ const option = computed(() => {
         markLine: {
           silent: true,
           symbol: "none",
-          lineStyle: { color: "#b45309", type: "dashed", width: 1 },
-          label: { formatter: `本课 ${props.courseAvg}`, fontSize: 10, color: "#b45309", position: "end" },
+          lineStyle: { color: "#16564a", type: "dashed", width: 1 },
+          label: { formatter: `本课 ${props.courseAvg}`, fontSize: 10, color: "#16564a", position: "end" },
           data: [{ xAxis: props.courseAvg }],
         },
       },

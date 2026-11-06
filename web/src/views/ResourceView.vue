@@ -6,7 +6,6 @@ import {
   downloadTeacherResource,
   uploadTeacherResource,
 } from "@/api/client";
-import DashNav from "@/components/DashNav.vue";
 import { useAuthStore } from "@/stores/auth";
 import type { TeacherResource } from "@/types";
 
@@ -118,8 +117,6 @@ onMounted(load);
 </script>
 
 <template>
-  <DashNav />
-
   <div class="res-page">
     <div class="res-head">
       <div class="res-tabs">
@@ -307,11 +304,11 @@ onMounted(load);
 }
 .btn.sm.danger {
   border: 1px solid #fecaca;
-  color: #b91c1c;
+  color: #9c231c;
   background: #fff;
 }
 .btn.sm.danger:hover {
-  background: #fef2f2;
+  background: #f9e8e5;
 }
 
 .res-list {

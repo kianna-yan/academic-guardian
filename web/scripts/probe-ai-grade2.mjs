@@ -1,0 +1,24 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8620";
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "student", account: "20240023", password: "0000" }) });
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900 });
+p.on("pageerror", (e) => console.log("PAGEERROR", e.message));
+p.on("console", (m) => { if (m.type() === "error") console.log("CONSOLE", m.text().slice(0, 160)); });
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), t);
+await p.goto(BASE + "/student/grade", { waitUntil: "networkidle2" });
+await new Promise((s) => setTimeout(s, 2400));
+const box = await p.evaluate(() => {
+  const el = document.querySelector('[data-test="back-ai"]');
+  const r = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { r: { x: r.x, y: r.y, w: r.width, h: r.height }, hit: hit?.className || hit?.tagName, vis: getComputedStyle(el).pointerEvents };
+});
+console.log("box", JSON.stringify(box));
+await p.evaluate(() => document.querySelector('[data-test="back-ai"]').click());
+await new Promise((s) => setTimeout(s, 1500));
+console.log("afterJS", await p.evaluate(() => ({ sheet: !!document.querySelector(".ai-sheet"), body: document.body.lastElementChild?.className })));
+await b.close();

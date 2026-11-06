@@ -212,8 +212,13 @@ class MessageCenter:
       导员账号 = 工号；一个学生的家长和导员之间只有一条会话线。
     - 每条消息记录 from/to/正文/时间/已读；发送时同时给对方推一条通知（复用 NOTIFS），
       保证对方即使不打开消息面板也能从铃铛红点 + 永久弹窗看到。
+    - 除了文字，还可以带附件（照片 / 语音 / 视频帧）：家长拍张作业照片、
+      按住说一段话，导员这边看得见也听得见。附件随消息一起存在内存里。
     - 纯内存实现（演示场景）。
     """
+
+    #: 单条消息最多带几个附件
+    MAX_MEDIA = 6
 
     def __init__(self) -> None:
         self._threads: dict[str, list[dict]] = {}   # thread_id → 消息列表（时间正序）
@@ -224,8 +229,23 @@ class MessageCenter:
     def thread_id(sid: str) -> str:
         return f"pc:{sid}"
 
+    @staticmethod
+    def media_label(kind: str) -> str:
+        return {"image": "照片", "audio": "语音", "video": "视频", "text": "文档"}.get(kind, "附件")
+
+    @classmethod
+    def preview(cls, text: str, media: list[dict] | None) -> str:
+        """列表和通知里的一句话摘要：有字就用字，没字就说带了什么。"""
+        text = (text or "").strip()
+        if text:
+            return text
+        if not media:
+            return ""
+        kinds = "、".join(dict.fromkeys(cls.media_label(m.get("kind", "")) for m in media))
+        return f"［{kinds}］"
+
     def _new(self, from_role: str, from_name: str, to_role: str, to_name: str,
-             text: str, sid: str) -> dict:
+             text: str, sid: str, media: list[dict] | None = None) -> dict:
         self._seq += 1
         return {
             "id": f"m{self._seq:04d}",
@@ -236,13 +256,14 @@ class MessageCenter:
             "to_role": to_role,
             "to_name": to_name,
             "text": text,
+            "media": media or [],
             "ts": _now(),
             "read": False,
         }
 
     def send(self, from_role: str, from_account: str, from_name: str,
              to_role: str, to_account: str, to_name: str, text: str,
-             sid: str) -> dict:
+             sid: str, media: list[dict] | None = None) -> dict:
         """发一条消息；同时给对方推一条通知（铃铛红点 + 永久弹窗）。
 
         只推这一条通知，前端不再合成第二条：旧版前端 notices.ts 会再合成一条
@@ -250,15 +271,17 @@ class MessageCenter:
         现在统一由后端推、kind 固定 family_message，标题就叫“发来家校消息”。
         """
         text = (text or "").strip()
-        if not text:
+        media = list(media or [])[: self.MAX_MEDIA]
+        if not text and not media:
             raise ValueError("消息内容不能为空")
-        msg = self._new(from_role, from_name, to_role, to_name, text, sid)
+        msg = self._new(from_role, from_name, to_role, to_name, text, sid, media)
         with self._lock:
             self._threads.setdefault(msg["thread_id"], []).append(msg)
         # 给对方推通知（唯一一份）
+        brief = self.preview(text, media)
         NOTIFS.push(to_role, to_account, "family_message",
                     f"{from_name} 发来家校消息",
-                    text[:80] + ("…" if len(text) > 80 else ""),
+                    brief[:80] + ("…" if len(brief) > 80 else ""),
                     {"thread_id": msg["thread_id"], "sid": sid, "msg_id": msg["id"]})
         return msg
 
@@ -305,7 +328,8 @@ class MessageCenter:
                 out.append({"thread_id": tid, "sid": sid,
                             "peer_name": "辅导员", "peer_role": "counselor",
                             "peer_phone": counselor_phone,
-                            "last_text": msgs[-1]["text"], "last_ts": msgs[-1]["ts"],
+                            "last_text": self.preview(msgs[-1].get("text"), msgs[-1].get("media")),
+                            "last_ts": msgs[-1]["ts"],
                             "unread": unread, "messages": list(msgs)})
             else:
                 out.append({"thread_id": tid, "sid": sid,
@@ -340,7 +364,7 @@ class MessageCenter:
                         "thread_id": tid, "sid": sid,
                         "peer_name": peer_name, "peer_role": "parent",
                         "peer_phone": peer_phone,
-                        "last_text": msgs[-1]["text"] if msgs else "",
+                        "last_text": self.preview(msgs[-1].get("text"), msgs[-1].get("media")) if msgs else "",
                         "last_ts": msgs[-1]["ts"] if msgs else "",
                         "unread": unread, "messages": list(msgs),
                         # 学生侧信息：供前端列表展示风险标签/分数/班级
@@ -365,7 +389,7 @@ class MessageCenter:
                     out.append({"thread_id": tid, "sid": sid,
                                 "peer_name": peer_name, "peer_role": "parent",
                                 "peer_phone": peer_phone,
-                                "last_text": msgs[-1]["text"] if msgs else "",
+                                "last_text": self.preview(msgs[-1].get("text"), msgs[-1].get("media")) if msgs else "",
                                 "last_ts": msgs[-1]["ts"] if msgs else "",
                                 "unread": unread, "messages": list(msgs)})
                 out.sort(key=lambda x: x["last_ts"] or "", reverse=True)

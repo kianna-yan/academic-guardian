@@ -77,13 +77,13 @@ defineProps<{
   gap: 8px;
 }
 .region-band.learn .rb-no {
-  background: #ecfdf5;
-  color: #047857;
+  background: #e2efe9;
+  color: #17604f;
   border-color: rgba(4, 120, 87, 0.2);
 }
 .region-band.risk .rb-no {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f9e8e5;
+  color: #b3261e;
   border-color: rgba(220, 38, 38, 0.2);
 }
 .region-band.ai .rb-no {

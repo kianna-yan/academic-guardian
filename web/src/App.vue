@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { ElNotification } from "element-plus/es/components/notification/index";
 import PasswordDialog from "@/components/PasswordDialog.vue";
-import SideBar from "@/components/SideBar.vue";
 import TopBar from "@/components/TopBar.vue";
+import AiSheet from "@/components/portal/AiSheet.vue";
 import { fetchLlmStatus, type LlmStatus } from "@/api/client";
 import { useAppStore } from "@/stores/app";
-import { useAuthStore, HOME_OF } from "@/stores/auth";
+import { HOME_OF, useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import { useNoticeStore } from "@/stores/notices";
 import type { Role } from "@/types";
@@ -19,17 +19,39 @@ const auth = useAuthStore();
 const chat = useChatStore();
 const notices = useNoticeStore();
 const route = useRoute();
+const router = useRouter();
 const pwdOpen = ref(false);
 
 const isLogin = computed(() => route.name === "login");
 const role = computed<Role>(() => auth.profile?.role ?? "student");
+
 /**
- * view-chat（overflow:hidden 的整页对话模式）只在「当前路由就是该角色主入口」
- * 且 homeMode==='chat' 时才加。否则从 /student（chat）跳到 /student/tree 等子页时，
- * homeMode 还是 'chat'，view-chat 仍生效，子页被 overflow:hidden 锁住划不动。
+ * 全站背景的星点：写死的确定性伪随机，刷新不跳动。
+ * 只在纸面上撒一层极淡的点，不抢任何数据内容。
  */
-const isChatRoute = computed(() => route.path === HOME_OF[role.value]);
-const chatMode = computed(() => chat.homeMode === "chat" && isChatRoute.value);
+const bgStars = (() => {
+  let seed = 20261105;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  return Array.from({ length: 34 }, () => ({
+    x: (rnd() * 100).toFixed(2),
+    y: (rnd() * 100).toFixed(2),
+    s: (1.6 + rnd() * 2.2).toFixed(1),
+    o: (0.1 + rnd() * 0.16).toFixed(2),
+    d: (rnd() * 7).toFixed(1),
+  }));
+})();
+/** 门户首屏：整页只有画布，不出现看板 */
+const isHome = computed(() => !!route.meta.home);
+/** 门户是唯一的入口层，进了任何内页都给一条回程路 + 一个唤起 AI 的口子 */
+const pageTitle = computed(() => (isHome.value ? "" : String(route.meta.title || "")));
+
+function backHome() {
+  void router.push(HOME_OF[role.value] || "/student");
+}
+
 
 // 切端 / 换账号时都重置对话面板：角色和账号任一变化都要换会话，
 // 否则同角色换账号（学生 A 退出 → 学生 B 登录）会短暂看到上一人的消息
@@ -96,7 +118,7 @@ watch(
  * 在侧栏没有红点）。这里按「路径 + 锚点 + 对话/看板模式」变化补一次静默刷新。
  */
 watch(
-  () => `${route.path}|${route.hash}|${chat.homeMode}`,
+  () => `${route.path}|${route.hash}|${chat.aiOpen}`,
   () => {
     if (!isLogin.value && auth.profile) void notices.refresh(true);
   },
@@ -168,12 +190,25 @@ onUnmounted(() => {
   </div>
 
   <div v-else class="app">
-    <SideBar />
-
-    <main class="main">
+    <!-- 全站背景：纸面上撒一层极淡的星点，滚动不动，也不吃鼠标事件 -->
+    <div class="app-stars" aria-hidden="true">
+      <i
+        v-for="(s, i) in bgStars"
+        :key="`bg-${i}`"
+        :style="{
+          left: `${s.x}%`,
+          top: `${s.y}%`,
+          width: `${s.s}px`,
+          height: `${s.s}px`,
+          opacity: s.o,
+          animationDelay: `${s.d}s`,
+        }"
+      ></i>
+    </div>
+    <main class="main" :class="{ 'main-home': isHome }">
       <TopBar @change-password="pwdOpen = true" />
 
-      <section class="view" :class="{ 'view-chat': chatMode }">
+      <section class="view" :class="{ 'view-home': isHome }">
         <!-- 大模型掉线：显式说明一句，否则回答变生硬会被当成系统坏了 -->
         <div v-if="llmOff" class="llm-banner">
           <span class="llm-dot" aria-hidden="true"></span>
@@ -196,6 +231,26 @@ onUnmounted(() => {
           <button class="link" @click="pwdOpen = true">立即修改</button>
         </div>
 
+        <!-- 内页：门户在上一层，给一条明确的回程路，并把 AI 抽屉的入口一起带过来 -->
+        <div v-if="pageTitle" class="back-bar">
+          <button class="back-btn" data-test="back-home" @click="backHome">
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <path
+                d="M14.5 6 8.5 12l6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            返回门户
+          </button>
+          <span class="back-sep" aria-hidden="true"></span>
+          <span class="back-title">{{ pageTitle }}</span>
+          <button class="back-ai" data-test="back-ai" @click="chat.openAi()">问 AI</button>
+        </div>
+
         <div v-if="app.error" class="card">
           <b>初始化失败</b>
           <p class="tiny muted">{{ app.error }}</p>
@@ -204,6 +259,9 @@ onUnmounted(() => {
         <router-view v-else />
       </section>
     </main>
+
+    <!-- AI 抽屉挂在应用层：不管当前在门户还是内页，唤起它都能铺满整个窗口 -->
+    <AiSheet v-if="auth.profile" :role="role" :sid="auth.profile?.sid || null" />
 
     <PasswordDialog v-model="pwdOpen" />
   </div>
@@ -214,6 +272,90 @@ onUnmounted(() => {
 .auth-page {
   min-height: 100vh;
 }
+/* 全站背景星点：只在纸面上浮一层，不影响任何可读性 */
+.app-stars {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.app-stars i {
+  position: absolute;
+  border-radius: 50%;
+  background: #16564a;
+  transform: translate(-50%, -50%);
+  animation: bgstar 6.4s ease-in-out infinite;
+}
+@keyframes bgstar {
+  0%,
+  100% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.34;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-stars i {
+    animation: none;
+  }
+}
+/* 版块页的回程条：不抢标题的层级，只是告诉人「你现在在里面，门在那边」 */
+.back-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--moss);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.back-btn:hover {
+  background: var(--moss);
+  border-color: var(--moss);
+  color: #f6f2e8;
+}
+.back-sep {
+  width: 18px;
+  height: 1px;
+  background: var(--line-strong);
+}
+.back-title {
+  font-family: var(--serif);
+  font-size: 12.5px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+/* 侧栏撤掉以后，内页也要有一条随时能唤起 AI 的路，否则只能退回门户。
+   刻意贴左边：右上角是消息弹窗的地盘，按钮放那儿会被通知盖住点不到 */
+.back-ai {
+  margin-left: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(180, 85, 45, 0.42);
+  border-radius: 999px;
+  background: var(--clay-soft);
+  color: var(--clay);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+}
+.back-ai:hover {
+  background: var(--clay);
+  color: #fdf3ee;
+}
 .pwd-banner {
   display: flex;
   align-items: center;
@@ -223,7 +365,7 @@ onUnmounted(() => {
   margin: 0 0 12px;
   padding: 9px 12px;
   border: 1px solid #fde68a;
-  background: #fffbeb;
+  background: #f9efdf;
   color: #92400e;
   border-radius: 9px;
   font-size: 12.5px;
@@ -260,7 +402,7 @@ onUnmounted(() => {
   flex: none;
   border: 0;
   background: transparent;
-  color: #b45309;
+  color: #16564a;
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
@@ -275,7 +417,7 @@ onUnmounted(() => {
 .pwd-banner .link {
   border: 0;
   background: transparent;
-  color: #b45309;
+  color: #16564a;
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;

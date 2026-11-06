@@ -324,6 +324,14 @@ export interface Overview {
   updated_at: string;
 }
 
+/** 门户首屏左侧栏：三个数字 + 三条焦点 */
+export interface PortalSummary {
+  stats: { label: string; value: number }[];
+  focus: { tag: string; title: string; meta: string }[];
+  focus_title: string;
+  model: string;
+}
+
 export interface Citation {
   citation: string;
   title?: string;
@@ -538,6 +546,16 @@ export interface NoticePayload {
 /* ------------------------------------------------------------------
  * 家长端 ↔ 辅导员端 双向消息
  * ---------------------------------------------------------------- */
+export interface MessageMedia {
+  kind: "image" | "audio" | "text";
+  name?: string;
+  mime?: string;
+  /** 图片 / 语音的 dataURL */
+  data?: string;
+  duration?: number;
+  transcript?: string;
+}
+
 export interface MessageItem {
   id: string;
   thread_id: string;
@@ -549,6 +567,8 @@ export interface MessageItem {
   text: string;
   ts: string;
   read: boolean;
+  /** 照片 / 语音：家长拍张作业照片或按住说一段话 */
+  media?: MessageMedia[];
 }
 
 export interface MessageThread {

@@ -1,0 +1,15 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8631";
+const r = await fetch(`${BASE}/api/auth/login`, {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({role:"parent",account:"20240067",password:"3333"})});
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args:["--no-sandbox","--autoplay-policy=no-user-gesture-required"] });
+const p = await b.newPage();
+await p.setViewport({width:1440,height:760,deviceScaleFactor:1.5});
+await p.evaluateOnNewDocument((x)=>localStorage.setItem("ag.token",x), t);
+await p.goto(BASE+"/messages",{waitUntil:"networkidle2"});
+await new Promise(s=>setTimeout(s,2400));
+const audio = await p.$$eval(".bm-audio audio", els=>els.length);
+console.log("audio bubbles", audio);
+await p.screenshot({ path: "C:/Users/lenovo/WorkBuddy/2026-11-03-16-18-31/_v8/shots_v4/parent_audio.png" });
+await b.close();

@@ -1,0 +1,17 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8620";
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "student", account: "20240023", password: "0000" }) });
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900 });
+p.on("pageerror", (e) => console.log("PAGEERROR", e.message));
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), t);
+await p.goto(BASE + "/student/grade", { waitUntil: "networkidle2" });
+await new Promise((s) => setTimeout(s, 2200));
+console.log("btn:", await p.evaluate(() => !!document.querySelector('[data-test="back-ai"]')));
+await p.click('[data-test="back-ai"]');
+await new Promise((s) => setTimeout(s, 1200));
+console.log("sheet:", await p.evaluate(() => !!document.querySelector(".ai-sheet")));
+await b.close();

@@ -198,7 +198,7 @@ function askAi(name: string) {
             <div class="kv">
               <div><span>期中卷面</span><b>{{ current.midterm }}</b></div>
               <div><span>班级均分</span><b>{{ current.cohort ?? "—" }}</b></div>
-              <div><span>挂科概率</span><b :style="{ color: current.fail > 0.5 ? 'var(--red)' : current.fail > 0.25 ? '#b45309' : 'var(--green)' }">
+              <div><span>挂科概率</span><b :style="{ color: current.fail > 0.5 ? 'var(--red)' : current.fail > 0.25 ? '#16564a' : 'var(--green)' }">
                 {{ Math.round(current.fail * 100) }}%</b></div>
               <div><span>本期变化</span><b :style="{ color: current.delta >= 0 ? 'var(--green)' : 'var(--red)' }">
                 {{ current.delta > 0 ? "+" : "" }}{{ current.delta }}</b></div>
@@ -275,7 +275,7 @@ function askAi(name: string) {
               {{ r.name }}
             </span>
             <span class="num">{{ r.score }}</span>
-            <span class="num" :style="{ color: r.fail > 0.5 ? 'var(--red)' : r.fail > 0.25 ? '#b45309' : 'var(--green)' }">
+            <span class="num" :style="{ color: r.fail > 0.5 ? 'var(--red)' : r.fail > 0.25 ? '#16564a' : 'var(--green)' }">
               {{ Math.round(r.fail * 100) }}%
             </span>
             <span class="badge" :style="{ color: STATUS_COLOR[r.status], borderColor: STATUS_COLOR[r.status] }">{{ STATUS_LABEL[r.status] }}</span>
@@ -571,7 +571,7 @@ function askAi(name: string) {
   color: var(--text);
 }
 .row:hover {
-  background: #faf6ee;
+  background: #f8f5ee;
 }
 .row.on {
   background: var(--brand-soft);

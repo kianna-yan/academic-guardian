@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
-import ChatHome from "@/components/ChatHome.vue";
-import DashNav from "@/components/DashNav.vue";
+import PortalHome from "@/components/portal/PortalHome.vue";
 import LetterDialog from "@/components/LetterDialog.vue";
 import RiskRing from "@/components/RiskRing.vue";
 import { useAppStore } from "@/stores/app";
@@ -15,6 +15,9 @@ import type { Citation, StudentDetail } from "@/types";
 const app = useAppStore();
 const auth = useAuthStore();
 const chat = useChatStore();
+const route = useRoute();
+/** 无 section = 门户首屏；有 section = 只渲染状态解读这一块 */
+const sec = computed(() => (route.meta.section as string) || "");
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(true);
 const error = ref("");
@@ -37,7 +40,7 @@ const tone = computed(() => {
 });
 
 const ringColor = computed(
-  () => ({ red: "#dc2626", yellow: "#d97706", green: "#047857" })[detail.value?.risk.level || "green"],
+  () => ({ red: "#b3261e", yellow: "#a9681f", green: "#17604f" })[detail.value?.risk.level || "green"],
 );
 
 async function load() {
@@ -68,17 +71,17 @@ async function openLetter() {
     ElMessage.error(e?.message || "生成失败");
   }
 }
+
+/** 家长信入口在「状态解读」页顶部的工具栏里，画布上不再单占一个节点 */
 </script>
 
 <template>
-  <!-- 对话是主入口：进来就是整页 AI 问答，孩子的学情报告按键前往 -->
-  <ChatHome v-if="chat.homeMode === 'chat'" role="parent" :sid="sid || null" />
+  <!-- 首屏图形门户：清单上的每一条排成画布节点，AI 收在最下面那条输入条里 -->
+  <PortalHome v-if="!sec" role="parent" :sid="sid || null" />
 
   <template v-else>
-    <DashNav />
-
     <div class="view-actions">
-      <span class="badge" style="background: #fff7ed; color: #b45309">家长视角</span>
+      <span class="badge" style="background: #fff7ed; color: #16564a">家长视角</span>
       <button class="btn primary" @click="openLetter">生成家长信</button>
       <button v-if="sid" class="btn" @click="downloadDoc(`/api/export/letter/${sid}?type=parent`)">
         导出家长信 Word

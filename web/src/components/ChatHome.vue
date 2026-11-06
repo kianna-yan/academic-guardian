@@ -5,6 +5,7 @@ import CitationList from "@/components/CitationList.vue";
 import MarkdownBody from "@/components/MarkdownBody.vue";
 import TraceSteps from "@/components/TraceSteps.vue";
 import { useChatStore, DEFAULT_SUGGEST } from "@/stores/chat";
+import { useAppStore } from "@/stores/app";
 import { api } from "@/api/client";
 import {
   humanSize,
@@ -16,13 +17,19 @@ import {
 } from "@/composables/media";
 import type { Role, SkillMeta, SkillSub } from "@/types";
 
-const props = defineProps<{ role: Role; sid: string | null }>();
+const props = defineProps<{ role: Role; sid: string | null; sheet?: boolean }>();
+const emit = defineEmits<{ (e: "close"): void }>();
 
 const chat = useChatStore();
+const app = useAppStore();
 const draft = ref("");
 const stream = ref<HTMLElement | null>(null);
 
-/** 每个端的整页对话：标题、副标题、以及「去看板」按键文案 */
+/** 右下角那块「已接入大模型」的牌子：模型名直接读后端 /meta，不写死 */
+const modelName = computed(() => String(app.meta?.llm?.model || "").trim());
+const modelLine = computed(() => (modelName.value ? `${modelName.value} · 实时推理` : "学情数据 · 实时推理"));
+
+/** 每个端的整页对话：标题、副标题、以及收起按钮的文案 */
 const HOME: Record<Role, { title: string; sub: string; dash: string }> = {
   student: {
     title: "学业助手",
@@ -82,13 +89,20 @@ watch(
   { immediate: true },
 );
 
-function goDash() {
-  chat.homeMode = "dash";
+function closeSheet() {
+  emit("close");
 }
 
 function scrollToBottom() {
   nextTick(() => {
-    if (stream.value) stream.value.scrollTop = stream.value.scrollHeight;
+    const el = stream.value;
+    if (!el) return;
+    // 只有开场简报和问候语时钉在顶部：否则一进来就看到简报被切掉半个头
+    if (chat.messages.length <= 1) {
+      el.scrollTop = 0;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
   });
 }
 
@@ -96,10 +110,11 @@ function scrollToBottom() {
 watch(() => chat.messages, scrollToBottom, { deep: true });
 watch(() => props.role, scrollToBottom);
 
-// 页面切走时把还在跑的流掐掉，否则请求会悬挂并往已卸载的视图里写数据
+// 页面切走时把还在跑的流掐掉，否则请求会悬挂并往已卸载的视图里写数据。
+// 抽屉里的对话例外：收起只是把面板滑回底部，回答该继续跑完，再展开还在。
 onBeforeUnmount(() => {
   cleanupRec();
-  chat.abort();
+  if (!props.sheet) chat.abort();
 });
 
 /* ------------------------------------------------------------------
@@ -583,8 +598,18 @@ function intentLabel(v: string): string {
         <strong>{{ home.title }}</strong>
         <span>{{ home.sub }}</span>
       </div>
-      <button class="ch-go-dash" @click="goDash">
-        📊 {{ home.dash }}
+      <button class="ch-go-dash" data-test="sheet-close" @click="closeSheet">
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+          <path
+            d="M6 9.5 12 15.5l6-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        收起
       </button>
     </header>
 
@@ -654,6 +679,14 @@ function intentLabel(v: string): string {
     </div>
 
     <div class="chat-home-foot">
+      <!-- 输入区左边那块空地：明说一句「这里接的是大模型」，不是关键词匹配 -->
+      <div class="ch-model" data-test="model-badge">
+        <span class="mm-live" aria-hidden="true"></span>
+        <div class="mm-tx">
+          <b>已接入教育大模型</b>
+          <i>{{ modelLine }}</i>
+        </div>
+      </div>
       <div class="chat-col">
         <div v-if="suggestList.length && !attachments.length && !recording" class="ch-suggest">
           <button v-for="s in suggestList" :key="s" class="chip" @click="send(s)">{{ s }}</button>
@@ -982,13 +1015,13 @@ function intentLabel(v: string): string {
 
 <style scoped>
 .chat-error {
-  color: #b91c1c;
+  color: #9c231c;
   font-size: 12px;
   margin-top: 4px;
 }
 .chat-intent {
   font-size: 10.5px;
-  color: #b09b85;
+  color: #7c8175;
   margin-top: 6px;
 }
 
@@ -1027,7 +1060,7 @@ function intentLabel(v: string): string {
   display: grid;
   place-items: center;
   border-radius: 7px;
-  background: #f6efe2;
+  background: #f0ebdf;
   font-size: 17px;
   flex: 0 0 auto;
 }
@@ -1047,7 +1080,7 @@ function intentLabel(v: string): string {
 }
 .ch-attach-meta .sz {
   font-size: 10px;
-  color: #b09b85;
+  color: #7c8175;
 }
 .ch-attach-x {
   flex: 0 0 auto;
@@ -1096,7 +1129,7 @@ function intentLabel(v: string): string {
   cursor: pointer;
 }
 .ch-skilltag button:hover {
-  color: #b45309;
+  color: #16564a;
 }
 
 /* 技能产出的文件卡：生成中占位，好了直接下载 */
@@ -1118,7 +1151,7 @@ function intentLabel(v: string): string {
   display: grid;
   place-items: center;
   border-radius: 9px;
-  background: #f6efe2;
+  background: #f0ebdf;
   font-size: 16px;
 }
 .ch-filecard .fc-body {
@@ -1138,7 +1171,7 @@ function intentLabel(v: string): string {
 .ch-filecard .fc-body i {
   font-style: normal;
   font-size: 10.5px;
-  color: #a58c72;
+  color: #7c8175;
 }
 .ch-filecard.fail {
   border-color: #f3d6d6;
@@ -1174,7 +1207,7 @@ function intentLabel(v: string): string {
 .ch-media-err {
   margin-bottom: 8px;
   font-size: 11.5px;
-  color: #b45309;
+  color: #16564a;
 }
 
 /* 用户气泡里的附件回显 */
@@ -1243,11 +1276,71 @@ function intentLabel(v: string): string {
 .thought-line {
   font-size: 11.5px;
   line-height: 1.55;
-  color: #a58c72;
+  color: #7c8175;
 }
 .thought-ico {
-  color: #b45309;
+  color: #16564a;
   margin-right: 4px;
   font-size: 10px;
+}
+/* 输入区左侧的「大模型接入」牌：补住那块空地，也把「我们真的接了模型」说明白 */
+.ch-model {
+  position: absolute;
+  left: 26px;
+  bottom: 24px;
+  width: 202px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 12px 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--moss) 22%, var(--line));
+  border-left: 3px solid var(--moss);
+  border-radius: 4px 12px 12px 4px;
+  background: color-mix(in srgb, #fffdf9 78%, transparent);
+  box-shadow: 0 6px 18px rgba(35, 38, 31, 0.05);
+}
+.mm-live {
+  flex: none;
+  margin-top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #17604f;
+  box-shadow: 0 0 0 3px rgba(23, 96, 79, 0.14);
+  animation: mmpulse 2.4s ease-in-out infinite;
+}
+@keyframes mmpulse {
+  50% {
+    box-shadow: 0 0 0 6px rgba(23, 96, 79, 0.06);
+    opacity: 0.6;
+  }
+}
+.mm-tx {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.mm-tx b {
+  font-family: var(--serif);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--moss);
+  line-height: 1.4;
+}
+.mm-tx i {
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  line-height: 1.5;
+  word-break: break-all;
+}
+/* 空间不够就先收起来，别压到输入框上 */
+@media (max-width: 1280px) {
+  .ch-model {
+    display: none;
+  }
 }
 </style>

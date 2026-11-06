@@ -1,0 +1,24 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8600";
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "student", account: "20240067", password: "0000" }) });
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox", "--proxy-server=direct://", "--proxy-bypass-list=*"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900, deviceScaleFactor: 2 });
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), t);
+await p.goto(`${BASE}/student`, { waitUntil: "networkidle2" });
+await p.mouse.move(3, 3);
+await new Promise((s) => setTimeout(s, 2600));
+const box = await p.evaluate(() => {
+  const s = document.querySelector('.pt-node[data-node="chat"] .nd-shape').getBoundingClientRect();
+  return { x: s.x - 18, y: s.y - 18, width: s.width + 36, height: s.height + 36 };
+});
+await p.screenshot({ path: "C:/tmp/del_before.png", clip: box });
+await p.evaluate(() => {
+  const poly = document.querySelector('.pt-node[data-node="chat"] polygon');
+  poly.remove();
+});
+await new Promise((s) => setTimeout(s, 300));
+await p.screenshot({ path: "C:/tmp/del_after.png", clip: box });
+await b.close();

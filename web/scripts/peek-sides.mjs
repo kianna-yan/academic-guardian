@@ -1,0 +1,23 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8600";
+const role = process.argv[2] || "student";
+const acc = { student: "20240067", counselor: "2024014589", admin: "1234567899", parent: "20240067", teacher: "2024014501" }[role];
+const pwd = { student: "0000", counselor: "1111", admin: "2222", parent: "3333", teacher: "4444" }[role];
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role, account: acc, password: pwd }) });
+const t = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox", "--proxy-server=direct://", "--proxy-bypass-list=*"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900 });
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), t);
+await p.goto(`${BASE}/${role}`, { waitUntil: "networkidle2" });
+await new Promise((s) => setTimeout(s, 2500));
+const out = await p.evaluate(() => [...document.querySelectorAll(".pt-node")].map((el) => {
+  const poly = el.querySelector("polygon");
+  const circ = el.querySelector("circle");
+  const pts = poly ? poly.getAttribute("points").trim().split(/\s+/) : [];
+  const cs = getComputedStyle(el.querySelector(".nd-shape"));
+  return { key: el.dataset.node, sides: circ ? 0 : pts.length, pts: pts.slice(0, 2), transform: cs.transform };
+}));
+console.log(JSON.stringify(out));
+await b.close();

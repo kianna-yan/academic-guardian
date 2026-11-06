@@ -425,7 +425,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   /* 五个端口一行排齐：写死 4 列会让教师端掉到第二行，看着像多余的第 5 项 */
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
-  background: #faf6ee;
+  background: #f8f5ee;
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 4px;
@@ -639,7 +639,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 /* 当前选中的端口高亮，和上面的 tab 呼应 */
 .hint-row.on {
   border-color: var(--brand);
-  background: #fdf1de;
+  background: #e3ece7;
 }
 .hr-ico {
   width: 16px;

@@ -13,9 +13,9 @@ const total = computed(
 const pct = (n: number) => (total.value ? ((n / total.value) * 100).toFixed(1) : "0.0");
 
 const rows = computed(() => [
-  { key: "red", label: "红色预警", color: "#dc2626", value: props.dist?.red || 0 },
-  { key: "yellow", label: "黄色关注", color: "#d97706", value: props.dist?.yellow || 0 },
-  { key: "green", label: "状态正常", color: "#047857", value: props.dist?.green || 0 },
+  { key: "red", label: "红色预警", color: "#b3261e", value: props.dist?.red || 0 },
+  { key: "yellow", label: "黄色关注", color: "#a9681f", value: props.dist?.yellow || 0 },
+  { key: "green", label: "状态正常", color: "#17604f", value: props.dist?.green || 0 },
 ]);
 
 const option = computed(() => ({

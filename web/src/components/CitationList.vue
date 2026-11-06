@@ -91,7 +91,7 @@ function shortPath(c: Citation) {
 }
 .cites-sub {
   font-size: 10px;
-  color: #b09b85;
+  color: #7c8175;
 }
 .cites-more {
   font-size: 10.5px;

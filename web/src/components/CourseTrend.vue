@@ -15,7 +15,7 @@ const props = withDefaults(
 
 const el = ref<HTMLElement | null>(null);
 
-const PALETTE = ["#b45309", "#d97706", "#a16207", "#7c2d12", "#ea580c", "#65a30d"];
+const PALETTE = ["#16564a", "#a9681f", "#a16207", "#7c2d12", "#ea580c", "#65a30d"];
 
 const axisLabels = computed(() => {
   const first = props.courses[0];
@@ -50,7 +50,7 @@ const option = computed(() => {
               silent: true,
               symbol: "none",
               lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
-              label: { formatter: "60", position: "insideEndTop", fontSize: 10, color: "#b45309" },
+              label: { formatter: "60", position: "insideEndTop", fontSize: 10, color: "#16564a" },
               data: [{ yAxis: 60 }],
             }
           : undefined,
@@ -100,8 +100,8 @@ const option = computed(() => {
       type: "value",
       min: (v: any) => Math.max(0, Math.floor(v.min - 6)),
       max: 100,
-      axisLabel: { fontSize: 11, color: "#c2a98d" },
-      splitLine: { lineStyle: { color: "#f7f0e5" } },
+      axisLabel: { fontSize: 11, color: "#c7bfab" },
+      splitLine: { lineStyle: { color: "#f4f0e6" } },
     },
     series,
   };

@@ -103,7 +103,7 @@ function ask(question: string) {
   position: absolute;
   inset: 0 auto 0 0;
   width: 3px;
-  background: linear-gradient(180deg, #d97706, #f2b566);
+  background: linear-gradient(180deg, #16564a, #9db8b1);
 }
 .b-head {
   display: flex;
@@ -115,7 +115,7 @@ function ask(question: string) {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: linear-gradient(135deg, #c2410c, #e89243);
+  background: linear-gradient(135deg, #16564a, #2c7364);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -135,7 +135,7 @@ function ask(question: string) {
   display: inline-block;
   width: 2px;
   height: 14px;
-  background: #d97706;
+  background: #a9681f;
   margin-left: 2px;
   vertical-align: -2px;
   animation: blink 0.9s steps(2) infinite;
@@ -146,14 +146,14 @@ function ask(question: string) {
 .b-refresh {
   border: 0;
   background: transparent;
-  color: var(--muted, #b09b85);
+  color: var(--muted, #7c8175);
   cursor: pointer;
   font-size: 15px;
   padding: 2px 6px;
   border-radius: 6px;
 }
 .b-refresh:hover {
-  background: #f7f0e5;
+  background: #f4f0e6;
   color: #7a6450;
 }
 .b-points {
@@ -175,8 +175,8 @@ function ask(question: string) {
   flex: none;
   font-size: 11px;
   font-weight: 600;
-  color: #c2410c;
-  background: #fdf1de;
+  color: #16564a;
+  background: #e3ece7;
   padding: 1px 7px;
   border-radius: 99px;
   white-space: nowrap;
@@ -186,16 +186,16 @@ function ask(question: string) {
 }
 .b-point.tone-red .b-label,
 .b-point.tone-down .b-label {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: #9c231c;
+  background: #f9e8e5;
 }
 .b-point.tone-warn .b-label {
-  color: #b45309;
-  background: #fffbeb;
+  color: #16564a;
+  background: #f9efdf;
 }
 .b-point.tone-up .b-label {
-  color: #047857;
-  background: #ecfdf5;
+  color: #17604f;
+  background: #e2efe9;
 }
 .b-asks {
   margin: 12px 0 0 40px;
@@ -206,7 +206,7 @@ function ask(question: string) {
 }
 .b-ask-hint {
   font-size: 11.5px;
-  color: var(--muted, #b09b85);
+  color: var(--muted, #7c8175);
 }
 .pt-enter-active {
   transition: all 0.35s ease;

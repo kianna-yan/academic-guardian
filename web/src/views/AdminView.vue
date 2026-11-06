@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api, downloadDoc } from "@/api/client";
-import ChatHome from "@/components/ChatHome.vue";
+import PortalHome from "@/components/portal/PortalHome.vue";
 import ClassCompare from "@/components/ClassCompare.vue";
-import DashNav from "@/components/DashNav.vue";
 import DistDonut from "@/components/DistDonut.vue";
 import FactorBars from "@/components/FactorBars.vue";
 import RegionBand from "@/components/RegionBand.vue";
@@ -19,6 +19,9 @@ import type {
 
 const app = useAppStore();
 const chat = useChatStore();
+const route = useRoute();
+/** 无 section = 门户首屏；有 section = 只渲染那一块（概览 / 规则 / 账号 / 课程） */
+const sec = computed(() => (route.meta.section as string) || "");
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
@@ -237,14 +240,13 @@ async function exportCSV() {
 </script>
 
 <template>
-  <!-- 对话是主入口：进来就是整页 AI 问答，规则与全校看板按键前往 -->
-  <ChatHome v-if="chat.homeMode === 'chat'" role="admin" :sid="null" />
+  <!-- 首屏图形门户：清单上的每一条排成画布节点，AI 收在最下面那条输入条里 -->
+  <PortalHome v-if="!sec" role="admin" :sid="null" />
 
   <template v-else>
-    <DashNav />
-
+  <template v-if="sec === 'board'">
     <div class="view-actions">
-      <span class="badge" style="background: #fdf1de; color: #b45309">规则版本 v1.2</span>
+      <span class="badge" style="background: #e3ece7; color: #16564a">规则版本 v1.2</span>
       <button class="btn" @click="exportCSV">导出预警名单</button>
       <button class="btn" @click="downloadDoc('/api/export/daily-report')">每日预警日报</button>
       <button class="btn primary" @click="downloadDoc('/api/export/semester')">学期汇报 PPT</button>
@@ -286,7 +288,9 @@ async function exportCSV() {
         <div v-else class="skeleton" style="height: 180px"></div>
       </div>
     </div>
+  </template>
 
+  <template v-if="sec === 'rules'">
   <RegionBand id="rules" no="01" title="预警规则" tone="risk"
     desc="红黄线一拖，全校当场重算；规则变了，名单和文书跟着变" />
 
@@ -321,7 +325,9 @@ async function exportCSV() {
       <span class="tiny muted">{{ message }}</span>
     </div>
   </div>
+  </template>
 
+  <template v-if="sec === 'accounts'">
   <RegionBand id="accounts" no="02" title="账号与权限" tone="learn"
     desc="批量开学生账号，学号不在学情库里的会逐行报错" />
 
@@ -392,7 +398,9 @@ async function exportCSV() {
       </div>
     </div>
   </div>
+  </template>
 
+  <template v-if="sec === 'curriculum'">
   <RegionBand id="curriculum" no="03" title="课程与教师档案" tone="ai"
     desc="学生端「我的任课老师」直接读这里，改完即时生效" />
 
@@ -478,6 +486,7 @@ async function exportCSV() {
   <p class="tiny muted" style="margin: 14px 2px 0">
     规则配置对全校立即生效，可用于演示不同学校的预警线差异。当前接入 {{ app.schools.length }} 所学校的校规知识库。
   </p>
+  </template>
   </template>
 </template>
 

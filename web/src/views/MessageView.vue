@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { useAuthStore } from "@/stores/auth";
 import { useNoticeStore } from "@/stores/notices";
+import { api } from "@/api/client";
+import {
+  humanSize,
+  pickImage,
+  startRecording,
+  type PickedMedia,
+  type Recorder,
+} from "@/composables/media";
+import type { MessageMedia } from "@/types";
 
 /**
  * 家校沟通独立整页：家长端 ↔ 辅导员端双向对话。
@@ -11,6 +20,7 @@ import { useNoticeStore } from "@/stores/notices";
  * - 家长端：只有一个会话（和自家孩子的辅导员），左侧不显示列表
  * - 辅导员端：左侧按学生列出所有家长会话，点谁和谁聊；带搜索框快速跳到某学生
  * - 对话头部显示对方联系方式（电话），方便双方互相找
+ * - 除了打字，家长还能拍张照片发过去、按住说一段话——很多事说不清，拍一张更快
  * - 复用 notices store 的 threads / sendMessage / markThreadRead
  */
 const auth = useAuthStore();
@@ -58,19 +68,207 @@ function selectThread(sid: string) {
   nextTick(scrollBottom);
 }
 
+/* ------------------------------------------------------------------
+ * 照片 / 语音
+ *
+ * 家长端最常发的不是长句子，是「这张作业照片」「我说两句」。
+ * 图片在本地压到长边 1280 再发；语音走 MediaRecorder，反过来还能顺便
+ * 交给后端转写一份文字，导员不点播放也能扫一眼知道说了什么。
+ * ---------------------------------------------------------------- */
+const pending = ref<PickedMedia[]>([]);
+const imgInput = ref<HTMLInputElement | null>(null);
+const busy = ref(false);
+const recording = ref(false);
+const recSeconds = ref(0);
+const holding = ref(false);
+const willCancel = ref(false);
+const hint = ref("");
+const MAX_ATTACH = 3;
+
+let rec: Recorder | null = null;
+let recTimer: number | null = null;
+let pressAt = 0;
+let pressY = 0;
+
+function note(msg: string) {
+  hint.value = msg;
+  window.setTimeout(() => {
+    if (hint.value === msg) hint.value = "";
+  }, 4000);
+}
+
+function addAttach(m: PickedMedia) {
+  if (pending.value.length >= MAX_ATTACH) {
+    note(`一次最多带 ${MAX_ATTACH} 个附件`);
+    return;
+  }
+  pending.value = [...pending.value, m];
+}
+
+function removeAttach(id: string) {
+  pending.value = pending.value.filter((x) => x.id !== id);
+}
+
+async function onImagePicked(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (file.size > 12 * 1024 * 1024) {
+    note(`照片太大了（${humanSize(file.size)}），换一张小于 12MB 的`);
+    return;
+  }
+  busy.value = true;
+  try {
+    addAttach(await pickImage(file));
+  } catch (e: any) {
+    note(e?.message || "这张照片读不出来");
+  } finally {
+    busy.value = false;
+  }
+}
+
+function clearTimer() {
+  if (recTimer) {
+    window.clearInterval(recTimer);
+    recTimer = null;
+  }
+}
+
+function detachHold() {
+  window.removeEventListener("pointermove", onHoldMove);
+  window.removeEventListener("pointerup", endHold);
+  window.removeEventListener("pointercancel", endHold);
+}
+
+function onHoldMove(ev: PointerEvent) {
+  if (!holding.value) return;
+  willCancel.value = pressY - ev.clientY > 60;
+}
+
+async function beginHold(ev: PointerEvent) {
+  if (busy.value || recording.value || holding.value || notices.sending) return;
+  pressAt = Date.now();
+  pressY = ev.clientY;
+  holding.value = true;
+  willCancel.value = false;
+  window.addEventListener("pointermove", onHoldMove);
+  window.addEventListener("pointerup", endHold);
+  window.addEventListener("pointercancel", endHold);
+  try {
+    rec = await startRecording();
+    if (!holding.value) {
+      rec.cancel();
+      rec = null;
+      return;
+    }
+    recording.value = true;
+    recSeconds.value = 0;
+    recTimer = window.setInterval(() => {
+      recSeconds.value += 1;
+      if (recSeconds.value >= 60) void stopRec();
+    }, 1000);
+  } catch (e: any) {
+    detachHold();
+    holding.value = false;
+    note(e?.message || "打不开麦克风，检查一下浏览器权限");
+  }
+}
+
+function endHold() {
+  const wasHolding = holding.value;
+  detachHold();
+  if (!wasHolding) return;
+  holding.value = false;
+  if (!recording.value) return;
+  if (willCancel.value) {
+    void cancelRec("已取消");
+    return;
+  }
+  if (Date.now() - pressAt < 500) {
+    void cancelRec("按住麦克风说话，说完再松开");
+    return;
+  }
+  void stopRec();
+}
+
+function cancelRec(msg: string) {
+  clearTimer();
+  recording.value = false;
+  willCancel.value = false;
+  recSeconds.value = 0;
+  const handle = rec;
+  rec = null;
+  handle?.cancel();
+  note(msg);
+}
+
+async function stopRec() {
+  clearTimer();
+  recording.value = false;
+  willCancel.value = false;
+  const handle = rec;
+  rec = null;
+  if (!handle) return;
+  busy.value = true;
+  try {
+    const media = await handle.stop();
+    // 顺手转一手文字：导员不点播放也能知道这段语音说了什么
+    try {
+      const r = await api.asr({ kind: "audio", data: media.data, mime: media.mime });
+      if (r?.ok && r.text) media.transcript = r.text;
+    } catch {
+      /* 转写不通就只发语音 */
+    }
+    addAttach(media);
+  } catch (e: any) {
+    note(e?.message || "录音失败");
+  } finally {
+    busy.value = false;
+  }
+}
+
+function toMessageMedia(list: PickedMedia[]): MessageMedia[] {
+  return list.map((m) => ({
+    kind: m.kind === "text" ? "text" : m.kind === "audio" ? "audio" : "image",
+    name: m.name,
+    mime: m.mime,
+    data: m.data || (m.frames && m.frames[0]) || "",
+    duration: m.duration,
+    transcript: m.transcript,
+  }));
+}
+
+function previewOf(a: PickedMedia): string {
+  if (a.kind === "audio") return a.duration ? `${a.duration} 秒` : "语音";
+  return humanSize(a.size);
+}
+
+const MEDIA_ICON: Record<string, string> = { image: "🖼", audio: "🎤", video: "🎬", text: "📄" };
+
 async function send() {
   const text = draft.value.trim();
-  if (!text || !currentThread.value) return;
+  if ((!text && !pending.value.length) || !currentThread.value) return;
   const sid = currentThread.value.sid;
   try {
-    await notices.sendMessage(sid, text);
+    await notices.sendMessage(sid, text, toMessageMedia(pending.value));
     draft.value = "";
+    pending.value = [];
     await nextTick();
     scrollBottom();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || "发送失败");
+    ElMessage.error(e?.response?.data?.detail || e?.message || "发送失败");
   }
 }
+
+onBeforeUnmount(() => {
+  clearTimer();
+  detachHold();
+  if (rec) {
+    rec.cancel();
+    rec = null;
+  }
+});
 
 function scrollBottom() {
   if (bodyRef.value) bodyRef.value.scrollTop = bodyRef.value.scrollHeight;
@@ -114,8 +312,8 @@ function backHome() {
     <!-- 顶栏已显示路由 title 与 sub，这里只放返回按钮，不再重复副标题 -->
     <div class="msg-head">
       <span class="muted tiny">
-        <template v-if="isParent">下方是与孩子辅导员的对话</template>
-        <template v-else>左侧按风险排序，红黄学生优先联系；可搜索任意学生</template>
+        <template v-if="isParent">下方是与孩子辅导员的对话，可以直接发照片、按住说话</template>
+        <template v-else>左侧按风险排序，红黄学生优先联系；家长发来的照片和语音都在会话里</template>
       </span>
       <button class="btn ghost" @click="backHome">返回工作台</button>
     </div>
@@ -194,19 +392,112 @@ function backHome() {
                 <b>{{ m.from_name }}</b>
                 <span class="bubble-ts">{{ m.ts }}</span>
               </div>
-              <p class="bubble-text">{{ m.text }}</p>
+              <!-- 附件先于文字：照片要占地方，语音要能直接点开听 -->
+              <div v-if="m.media && m.media.length" class="bubble-media">
+                <template v-for="(a, ai) in m.media" :key="ai">
+                  <a
+                    v-if="a.kind === 'image' && a.data"
+                    class="bm-img"
+                    :href="a.data"
+                    target="_blank"
+                    rel="noopener"
+                    :title="a.name || '查看原图'"
+                  >
+                    <img :src="a.data" :alt="a.name || '照片'" />
+                  </a>
+                  <div v-else-if="a.kind === 'audio' && a.data" class="bm-audio">
+                    <span class="bm-audio-ico" aria-hidden="true">🎤</span>
+                    <audio :src="a.data" controls preload="metadata"></audio>
+                    <span v-if="a.duration" class="bm-audio-sec">{{ a.duration }}″</span>
+                  </div>
+                  <div v-else class="bm-file">
+                    <span aria-hidden="true">{{ MEDIA_ICON[a.kind] || "📎" }}</span>
+                    {{ a.name || "附件" }}
+                  </div>
+                  <p v-if="a.kind === 'audio' && a.transcript" class="bm-transcript">
+                    「{{ a.transcript }}」
+                  </p>
+                </template>
+              </div>
+              <p v-if="m.text" class="bubble-text">{{ m.text }}</p>
             </div>
           </div>
           <div class="conv-input">
-            <textarea
-              v-model="draft"
-              rows="2"
-              placeholder="输入消息，回车发送（Shift+回车换行）"
-              @keydown.enter.exact.prevent="send"
-            ></textarea>
-            <button class="btn ok" :disabled="notices.sending || !draft.trim()" @click="send">
-              {{ notices.sending ? "发送中…" : "发送" }}
-            </button>
+            <!-- 待发的附件：发之前能看清带的是哪张照片、哪段话 -->
+            <div v-if="pending.length" class="ci-attach">
+              <div v-for="a in pending" :key="a.id" class="ci-item">
+                <img v-if="a.kind === 'image' && a.thumb" :src="a.thumb" :alt="a.name" />
+                <span v-else class="ci-ico">{{ MEDIA_ICON[a.kind] }}</span>
+                <div class="ci-meta">
+                  <b>{{ a.kind === "image" ? "照片" : a.kind === "audio" ? "语音" : a.name }}</b>
+                  <i>{{ previewOf(a) }}</i>
+                </div>
+                <button type="button" title="移除" @click="removeAttach(a.id)">×</button>
+              </div>
+            </div>
+
+            <div v-if="hint" class="ci-hint">{{ hint }}</div>
+
+            <!-- 录音中：整条变成「松开发送 / 上滑取消」 -->
+            <div v-if="recording" class="ci-voice" :class="{ 'will-cancel': willCancel }">
+              <span class="ci-wave"><i></i><i></i><i></i><i></i><i></i></span>
+              <span>{{ willCancel ? "松开手指，取消发送" : `正在听… ${recSeconds}″` }}</span>
+              <button type="button" class="ci-voice-stop" @click.stop="stopRec">结束</button>
+            </div>
+
+            <div v-else class="ci-row">
+              <button
+                type="button"
+                class="ci-btn"
+                :disabled="busy || notices.sending"
+                title="发一张照片"
+                aria-label="发照片"
+                data-test="msg-photo"
+                @click="imgInput?.click()"
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <circle cx="8.6" cy="10.2" r="1.5" fill="currentColor" />
+                  <path d="M4.5 17l4.6-4.2 3.4 2.9 2.9-2.4 3.9 3.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <textarea
+                v-model="draft"
+                rows="2"
+                placeholder="说点什么，回车发送（Shift+回车换行）"
+                @keydown.enter.exact.prevent="send"
+              ></textarea>
+              <button
+                type="button"
+                class="ci-btn mic"
+                :class="{ on: holding || recording }"
+                :disabled="busy || notices.sending"
+                title="按住说话，松开结束；上滑可取消"
+                aria-label="按住说话"
+                data-test="msg-voice"
+                @pointerdown.prevent="beginHold"
+                @contextmenu.prevent
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                  <rect x="9" y="2.8" width="6" height="10.4" rx="3" fill="none" stroke="currentColor" stroke-width="1.7" />
+                  <path d="M5.2 11.2a6.8 6.8 0 0 0 13.6 0M12 18.2V21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+              </button>
+              <button
+                class="btn ok"
+                :disabled="notices.sending || (!draft.trim() && !pending.length)"
+                @click="send"
+              >
+                {{ notices.sending ? "发送中…" : "发送" }}
+              </button>
+            </div>
+            <input
+              ref="imgInput"
+              type="file"
+              accept="image/*"
+              class="ci-file"
+              @change="onImagePicked"
+            />
           </div>
         </template>
       </section>
@@ -349,13 +640,13 @@ function backHome() {
   background: var(--brand-soft);
 }
 .thread-row.red {
-  border-left-color: #dc2626;
+  border-left-color: #b3261e;
 }
 .thread-row.yellow {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
 }
 .thread-row.green {
-  border-left-color: #16a34a;
+  border-left-color: #17604f;
 }
 .thread-row.on b {
   color: var(--brand);
@@ -370,11 +661,11 @@ function backHome() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #16a34a;
+  background: #17604f;
 }
-.lv-dot.red { background: #dc2626; }
-.lv-dot.yellow { background: #d97706; }
-.lv-dot.green { background: #16a34a; }
+.lv-dot.red { background: #b3261e; }
+.lv-dot.yellow { background: #a9681f; }
+.lv-dot.green { background: #17604f; }
 .thread-row b {
   flex: 1;
   font-size: 13px;
@@ -403,9 +694,9 @@ function backHome() {
   padding: 1px 6px;
   border-radius: 6px;
 }
-.thread-score.red { color: #b91c1c; background: #fef2f2; }
-.thread-score.yellow { color: #b45309; background: #fffbeb; }
-.thread-score.green { color: #047857; background: #ecfdf5; }
+.thread-score.red { color: #9c231c; background: #f9e8e5; }
+.thread-score.yellow { color: #16564a; background: #f9efdf; }
+.thread-score.green { color: #17604f; background: #e2efe9; }
 .thread-ts {
   font-size: 10.5px;
   color: var(--muted);
@@ -423,7 +714,7 @@ function backHome() {
   height: 17px;
   padding: 0 5px;
   border-radius: 999px;
-  background: #dc2626;
+  background: #b3261e;
   color: #fff;
   font-size: 10px;
   font-weight: 600;
@@ -506,7 +797,7 @@ function backHome() {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #dc2626;
+  background: #b3261e;
   color: #fff;
 }
 .conv-body {
@@ -561,17 +852,22 @@ function backHome() {
   word-break: break-word;
   color: var(--text);
 }
-/* 输入区：textarea 与按钮同高对齐 */
+/* 输入区：上面是待发附件，下面一行「照片 / 文字 / 语音 / 发送」 */
 .conv-input {
   flex: none;
   display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 10px;
   border-top: 1px solid var(--line);
   background: #fff;
+}
+.ci-row {
+  display: flex;
+  gap: 8px;
   align-items: stretch;
 }
-.conv-input textarea {
+.ci-row textarea {
   flex: 1;
   resize: none;
   border: 1px solid var(--line);
@@ -584,8 +880,209 @@ function backHome() {
   line-height: 1.5;
   min-height: 40px;
 }
-.conv-input textarea:focus {
+.ci-row textarea:focus {
   border-color: var(--brand);
+}
+.ci-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbf9f3;
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+.ci-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.ci-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ci-btn.mic.on {
+  border-color: var(--clay);
+  background: var(--clay-soft);
+  color: var(--clay);
+}
+.ci-file {
+  display: none;
+}
+/* 待发附件条 */
+.ci-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ci-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf8;
+  max-width: 230px;
+}
+.ci-item img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 7px;
+}
+.ci-ico {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #f0ebdf;
+  font-size: 16px;
+}
+.ci-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ci-meta b {
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.ci-meta i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+.ci-item button {
+  border: 0;
+  background: #f1e7d8;
+  color: #8a7357;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.ci-hint {
+  font-size: 11.5px;
+  color: var(--clay);
+}
+/* 录音中 */
+.ci-voice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 12px;
+  border: 1px solid rgba(180, 85, 45, 0.4);
+  border-radius: 8px;
+  background: var(--clay-soft);
+  color: var(--clay);
+  font-size: 13px;
+}
+.ci-voice.will-cancel {
+  border-color: #b3261e;
+  background: var(--red-soft);
+  color: #9c231c;
+}
+.ci-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.ci-wave i {
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: cwave 0.9s ease-in-out infinite;
+}
+.ci-wave i:nth-child(1) { height: 7px; animation-delay: 0s; }
+.ci-wave i:nth-child(2) { height: 14px; animation-delay: 0.12s; }
+.ci-wave i:nth-child(3) { height: 9px; animation-delay: 0.24s; }
+.ci-wave i:nth-child(4) { height: 16px; animation-delay: 0.36s; }
+.ci-wave i:nth-child(5) { height: 8px; animation-delay: 0.48s; }
+@keyframes cwave {
+  50% { transform: scaleY(0.4); opacity: 0.6; }
+}
+.ci-voice-stop {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* 气泡里的照片 / 语音 */
+.bubble-media {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.bm-img {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  line-height: 0;
+  background: #fff;
+}
+.bm-img img {
+  display: block;
+  width: auto;
+  max-width: 240px;
+  max-height: 220px;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.bm-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  max-width: 300px;
+}
+.bm-audio-ico {
+  font-size: 14px;
+}
+.bm-audio audio {
+  height: 30px;
+  max-width: 210px;
+}
+.bm-audio-sec {
+  font-size: 11px;
+  color: var(--muted);
+}
+.bm-transcript {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 280px;
+}
+.bm-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
 }
 .btn.ok {
   align-self: stretch;

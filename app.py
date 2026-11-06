@@ -348,7 +348,10 @@ class ReadIn(BaseModel):
 
 class MessageSendIn(BaseModel):
     sid: str           # 学生学号：家长发时=自己孩子，导员发时=指定学生
-    text: str
+    text: str = ""
+    # 家长常干的事：拍张孩子的作业/成绩单照片发过去，或者直接按住说一段话。
+    # 附件与文字走同一条消息，都会落在这条会话里。
+    media: list[MediaIn] | None = None
 
 
 class MessageReadIn(BaseModel):
@@ -513,6 +516,141 @@ def meta():
 @app.get("/api/overview")
 def overview():
     return ENGINE.overview()
+
+
+# ---------------------------------------------------------------------------
+# 门户首屏左侧那一栏：三个数字 + 三件最该先做的事
+#
+# 口径全部复用已有数据（风险分、待办、未读通知），不新造指标：
+# 前端拿到什么就显示什么，取不到就留空，由页面自己收边。
+# ---------------------------------------------------------------------------
+_TODO_TAG = {
+    "homework": "作业",
+    "attendance": "考勤",
+    "risk": "风险",
+    "appeal": "异议",
+    "talk": "约谈",
+    "grade": "成绩",
+}
+
+
+def _int(v, default: int = 0) -> int:
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.get("/api/portal/summary")
+def portal_summary(request: Request):
+    """门户左侧栏的数据：三格统计 + 三条焦点（优先读待办，不够补未读通知）。"""
+    p = request.state.profile
+    role = p.get("role") or "student"
+    account = p.get("account") or ""
+    sid = p.get("sid") or ""
+
+    todos = [t for t in TODOS.items(role, account) if not t.get("done")]
+    unread = NOTIFS.unread(role, account)
+    stats: list[dict] = []
+
+    try:
+        if role in ("student", "parent"):
+            sc = ENGINE.score(sid) if sid else {"score": 0, "level": "green"}
+            acts = ENGINE.interventions(sid) if sid else []
+            if role == "student":
+                stats = [
+                    {"label": "风险分", "value": _int(sc.get("score"))},
+                    {"label": "项待办", "value": len(todos)},
+                    {"label": "个帮扶", "value": len(acts)},
+                ]
+            else:
+                stats = [
+                    {"label": "风险分", "value": _int(sc.get("score"))},
+                    {"label": "条提醒", "value": len(unread)},
+                    {"label": "项待办", "value": len(todos)},
+                ]
+        elif role == "counselor":
+            adv = p.get("advisor") or p.get("name") or ""
+            rows = [r for r in ENGINE.roster() if r.get("advisor") == adv] or ENGINE.roster()
+            red = sum(1 for r in rows if r.get("level") == "red")
+            msgs = MESSAGES.unread_count("counselor", account)
+            stats = [
+                {"label": "人红标", "value": red},
+                {"label": "项待办", "value": len(todos)},
+                {"label": "条家长消息", "value": msgs},
+            ]
+        elif role == "teacher":
+            tname = p.get("advisor") or p.get("name") or ""
+            try:
+                mine = ENGINE.teacher_view(tname)["students"]
+            except Exception:
+                mine = []
+            red = sum(1 for r in mine if r.get("level") == "red")
+            stats = [
+                {"label": "名学生", "value": len(mine)},
+                {"label": "人红标", "value": red},
+                {"label": "项待办", "value": len(todos)},
+            ]
+        elif role == "admin":
+            ov = ENGINE.overview()
+            stats = [
+                {"label": "名学生", "value": _int(ov.get("total"))},
+                {"label": "人红标", "value": _int(ov.get("dist", {}).get("red"))},
+                {"label": "项待办", "value": len(todos)},
+            ]
+    except Exception:
+        stats = stats or []
+
+    focus: list[dict] = []
+    # 首屏消息卡一次只露两条，多给几条才滚得起来：待办优先，不够用未读补
+    for t in todos[:6]:
+        focus.append({
+            "tag": _TODO_TAG.get(t.get("kind") or "", "待办"),
+            "title": t.get("title") or "",
+            "meta": (t.get("detail") or "")[:36],
+        })
+    if len(focus) < 6:
+        for n in unread[: 6 - len(focus)]:
+            focus.append({
+                "tag": "消息",
+                "title": n.get("title") or "",
+                "meta": (n.get("text") or "")[:36],
+            })
+    # 教务端这类「没有个人待办」的账号：用全校统计补两条，别让左下角空着
+    if not focus:
+        try:
+            ov = ENGINE.overview()
+            hot = sorted(ov.get("by_class", {}).items(), key=lambda kv: -kv[1].get("red", 0))
+            for name, st in hot[:2]:
+                if st.get("red"):
+                    focus.append({
+                        "tag": "班级",
+                        "title": f"{name} 红色 {st['red']} 人",
+                        "meta": f"共 {st['total']} 人，平均分 {st['avg_score']}",
+                    })
+            tops = ov.get("top_factors") or []
+            if tops:
+                focus.append({
+                    "tag": "主因",
+                    "title": f"全校头号风险因素：{tops[0]['label']}",
+                    "meta": f"人均扣 {tops[0]['points']} 分",
+                })
+        except Exception:
+            pass
+
+    if todos:
+        focus_title = "优先处理"
+    elif focus:
+        focus_title = "最近提醒" if any(f["tag"] == "消息" for f in focus) else "本周关注"
+    else:
+        focus_title = "本周关注"
+
+    return {
+        "stats": stats,
+        "focus": focus,
+        "focus_title": focus_title,
+        "model": llm.status().get("model", ""),
+    }
 
 
 @app.get("/api/students")
@@ -1386,15 +1524,53 @@ def messages_list(request: Request):
     return {"threads": threads, "unread": MESSAGES.unread_count(role, p.get("account") or "")}
 
 
+_MSG_MEDIA_LIMIT = 2_200_000   # 单条消息附件总量上限（base64 字符数，约 1.6MB 原文件）
+
+
+def _clean_message_media(items: list[MediaIn] | None) -> list[dict]:
+    """家校消息里的附件：只留能被波形/图片直接渲染的字段。
+
+    图片/语音前端已经压过一遍（长边 1280、opus 录音），这里再做一次体量把关：
+    超了就让用户换小一点的，而不是把整条会话撑爆。
+    """
+    out: list[dict] = []
+    total = 0
+    for it in (items or [])[:6]:
+        kind = (it.kind or "").strip()
+        data = (it.data or "").strip()
+        if kind == "video" and not data:
+            # 视频不进会话，只留一张静帧当图片
+            frames = [f for f in (it.frames or []) if f]
+            if frames:
+                kind, data = "image", frames[0]
+        if kind not in ("image", "audio", "text"):
+            continue
+        if not data:
+            continue
+        total += len(data)
+        if total > _MSG_MEDIA_LIMIT:
+            raise HTTPException(413, "附件太大了，换一张小一点的照片或短一点的语音")
+        out.append({
+            "kind": kind,
+            "name": (it.name or "")[:60],
+            "mime": (it.mime or "")[:60],
+            "data": data,
+            "duration": it.duration,
+            "transcript": (it.transcript or "")[:200],
+        })
+    return out
+
+
 @app.post("/api/messages/send")
 def messages_send(body: MessageSendIn, request: Request):
     p = request.state.profile
     role = p.get("role")
     sid = (body.sid or "").strip()
     text = (body.text or "").strip()
+    media = _clean_message_media(body.media)
     if not sid:
         raise HTTPException(400, "缺少学生学号")
-    if not text:
+    if not text and not media:
         raise HTTPException(400, "消息内容不能为空")
     if len(text) > 500:
         raise HTTPException(400, "单条消息不超过 500 字")
@@ -1404,7 +1580,7 @@ def messages_send(body: MessageSendIn, request: Request):
         if sid != p.get("account"):
             raise HTTPException(403, "只能就自己的孩子与辅导员沟通")
         msg = MESSAGES.send("parent", sid, from_name,
-                            "counselor", COUNSELOR_ACCOUNT, "辅导员", text, sid)
+                            "counselor", COUNSELOR_ACCOUNT, "辅导员", text, sid, media)
     elif role == "counselor":
         # 导员可以就任意学生发消息给其家长
         if sid not in {s["id"] for s in DATASET["students"]}:
@@ -1412,7 +1588,7 @@ def messages_send(body: MessageSendIn, request: Request):
         stu = ENGINE.get(sid)
         to_name = f"{stu['name']} 家长"
         msg = MESSAGES.send("counselor", COUNSELOR_ACCOUNT, from_name,
-                            "parent", sid, to_name, text, sid)
+                            "parent", sid, to_name, text, sid, media)
     else:
         raise HTTPException(403, "只有家长端和辅导员端可以发送家校消息")
     return {"ok": True, "message": msg}

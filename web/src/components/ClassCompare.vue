@@ -43,7 +43,7 @@ const option = computed(() => {
         type: "bar",
         stack: "t",
         barWidth: 14,
-        itemStyle: { color: "#dc2626", borderRadius: [4, 0, 0, 4] },
+        itemStyle: { color: "#b3261e", borderRadius: [4, 0, 0, 4] },
         data: list.map((c) => props.byClass[c].red),
       },
       {
@@ -51,7 +51,7 @@ const option = computed(() => {
         type: "bar",
         stack: "t",
         barWidth: 14,
-        itemStyle: { color: "#d97706" },
+        itemStyle: { color: "#a9681f" },
         data: list.map((c) => props.byClass[c].yellow),
       },
       {
@@ -69,7 +69,7 @@ const option = computed(() => {
               position: "right",
               distance: 8,
               fontSize: 11,
-              color: "#8e7a66",
+              color: "#7c8175",
               formatter: `红 ${s.red} · 黄 ${s.yellow} · 均分 ${s.avg_score}`,
             },
           };
@@ -86,8 +86,8 @@ useChart(el, option);
   <div>
     <div ref="el" :style="{ width: '100%', height: `${height}px` }"></div>
     <div class="compare-legend">
-      <span><i style="background: #dc2626"></i>红色预警</span>
-      <span><i style="background: #d97706"></i>黄色关注</span>
+      <span><i style="background: #b3261e"></i>红色预警</span>
+      <span><i style="background: #a9681f"></i>黄色关注</span>
       <span><i style="background: #eadfcd"></i>状态正常</span>
     </div>
   </div>

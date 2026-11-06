@@ -270,7 +270,7 @@ function statusLabel(s: string) {
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: #dc2626;
+  background: #b3261e;
   color: #fff;
   font-size: 10px;
   font-weight: 600;
@@ -321,7 +321,7 @@ function statusLabel(s: string) {
   margin-left: 2px;
   padding: 0 5px;
   border-radius: 999px;
-  background: #dc2626;
+  background: #b3261e;
   color: #fff;
   font-size: 10px;
 }
@@ -410,7 +410,7 @@ function statusLabel(s: string) {
 }
 .todo-x:hover {
   background: #fee2e2;
-  color: #dc2626;
+  color: #b3261e;
 }
 .todo-foot {
   padding: 4px 12px 8px;

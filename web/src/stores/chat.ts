@@ -90,8 +90,12 @@ function clearSession(role: Role, account: string): void {
 
 export const useChatStore = defineStore("chat", () => {
   const auth = useAuthStore();
-  /** 对话是主入口：chat = 整页 AI 问答（默认），dash = 数据看板 */
-  const homeMode = ref<"chat" | "dash">("chat");
+  /**
+   * AI 抽屉是否展开。
+   * 端口首屏先给图形门户，AI 收在最下方那条输入条里；点一下向上铺满，
+   * 收起后原样退回。对话本身不随抽屉开关丢失（消息在 store 里）。
+   */
+  const aiOpen = ref(false);
   const messages = ref<ChatMessage[]>([]);
   const suggestions = ref<string[]>([]);
   /**
@@ -160,7 +164,6 @@ export const useChatStore = defineStore("chat", () => {
       messages.value = [greeting(role)];
     }
     setSuggest(role);
-    homeMode.value = "chat";
   }
 
   /** 清空当前端的会话（换个思路重新聊）：后端记忆 + 本地存档一起清 */
@@ -171,7 +174,6 @@ export const useChatStore = defineStore("chat", () => {
     currentKey.value = `${role}:${account}`;
     messages.value = [greeting(role)];
     setSuggest(role);
-    homeMode.value = "chat";
     try {
       await api.resetAgent();          // 后端会话记忆一并清掉
     } catch {
@@ -288,11 +290,32 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  /** 页面上任何位置的「问 AI」都走这里：回到整页对话并直接发问 */
+  /** 页面上任何位置的「问 AI」都走这里：展开抽屉并直接发问 */
   function ask(role: Role, sid: string | null, question: string) {
-    homeMode.value = "chat";
+    aiOpen.value = true;
     void send(role, sid, question);
   }
 
-  return { homeMode, messages, suggestions, suggRole, streaming, send, reset, ensure, abort, ask };
+  function openAi() {
+    aiOpen.value = true;
+  }
+
+  function closeAi() {
+    aiOpen.value = false;
+  }
+
+  return {
+    aiOpen,
+    messages,
+    suggestions,
+    suggRole,
+    streaming,
+    send,
+    reset,
+    ensure,
+    abort,
+    ask,
+    openAi,
+    closeAi,
+  };
 });

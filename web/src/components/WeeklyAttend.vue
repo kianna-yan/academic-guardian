@@ -43,12 +43,12 @@ const option = computed(() => {
       data: rows.map((r) => `第${r.week}周`),
       axisTick: { show: false },
       axisLine: { lineStyle: { color: "#eadfcd" } },
-      axisLabel: { fontSize: 10.5, color: "#8e7a66" },
+      axisLabel: { fontSize: 10.5, color: "#7c8175" },
     },
     yAxis: {
       type: "value",
       splitLine: { lineStyle: { color: "#f2e9da" } },
-      axisLabel: { fontSize: 11, color: "#8e7a66" },
+      axisLabel: { fontSize: 11, color: "#7c8175" },
     },
     series: [
       {
@@ -56,7 +56,7 @@ const option = computed(() => {
         type: "bar",
         stack: "a",
         barWidth: "46%",
-        itemStyle: { color: "#dc2626", borderRadius: [0, 0, 0, 0] },
+        itemStyle: { color: "#b3261e", borderRadius: [0, 0, 0, 0] },
         data: rows.map((r) => r.absent),
       },
       {

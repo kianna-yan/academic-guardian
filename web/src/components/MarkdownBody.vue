@@ -32,7 +32,7 @@ const html = computed(() => md.render(props.text || ""));
 
 <style scoped>
 .md :deep(a) {
-  color: #b45309;
+  color: #16564a;
   text-decoration: underline;
   text-underline-offset: 3px;
 }

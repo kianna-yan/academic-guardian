@@ -395,21 +395,21 @@ function askAi(course?: string) {
   display: inline-block;
 }
 .dot.full {
-  background: #047857;
+  background: #17604f;
 }
 .dot.fuzzy {
-  background: #d97706;
+  background: #a9681f;
 }
 .dot.lost {
-  background: #dc2626;
+  background: #b3261e;
 }
 .dot.none {
   background: #fff;
-  border: 1px solid #d9c9b3;
+  border: 1px solid #c7bfab;
 }
 .dot.heal {
   background: #fff;
-  border: 2px solid #047857;
+  border: 2px solid #17604f;
 }
 
 .sum-card {
@@ -428,7 +428,7 @@ function askAi(course?: string) {
   gap: 1px;
   padding: 8px 12px;
   border-radius: 10px;
-  background: #faf6ee;
+  background: #f8f5ee;
 }
 .sum b {
   font-size: 22px;
@@ -467,7 +467,7 @@ function askAi(course?: string) {
   gap: 10px;
 }
 .advice {
-  border-left: 3px solid #d97706;
+  border-left: 3px solid #a9681f;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -547,7 +547,7 @@ function askAi(course?: string) {
   border-left: 3px solid var(--red);
 }
 .course.watch {
-  border-left: 3px solid #d97706;
+  border-left: 3px solid #a9681f;
 }
 .course.ok {
   border-left: 3px solid var(--green);
@@ -578,15 +578,15 @@ function askAi(course?: string) {
   white-space: nowrap;
 }
 .status-pill.red {
-  background: #fef2f2;
+  background: #f9e8e5;
   color: var(--red);
 }
 .status-pill.amber {
-  background: #fffbeb;
+  background: #f9efdf;
   color: var(--amber);
 }
 .status-pill.green {
-  background: #ecfdf5;
+  background: #e2efe9;
   color: var(--green);
 }
 .course-line {
@@ -664,7 +664,7 @@ function askAi(course?: string) {
   border: 2px solid #fff;
   background: #fff;
   padding: 0;
-  box-shadow: 0 0 0 1px #d9c9b3;
+  box-shadow: 0 0 0 1px #c7bfab;
   transition: transform 0.12s;
 }
 .node:hover {
@@ -675,22 +675,22 @@ function askAi(course?: string) {
   box-shadow: 0 0 0 1px #e3d6c4;
 }
 .node.full {
-  background: #047857;
-  box-shadow: 0 0 0 1px #047857;
+  background: #17604f;
+  box-shadow: 0 0 0 1px #17604f;
 }
 .node.fuzzy {
-  background: #d97706;
-  box-shadow: 0 0 0 1px #d97706;
+  background: #a9681f;
+  box-shadow: 0 0 0 1px #a9681f;
 }
 .node.lost {
-  background: #dc2626;
-  box-shadow: 0 0 0 1px #dc2626;
+  background: #b3261e;
+  box-shadow: 0 0 0 1px #b3261e;
 }
 .heal-ring {
   position: absolute;
   inset: -5px;
   border-radius: 50%;
-  border: 1.5px solid #047857;
+  border: 1.5px solid #17604f;
   opacity: 0.55;
 }
 .week-row {
@@ -724,7 +724,7 @@ function askAi(course?: string) {
   gap: 9px;
   padding: 8px 11px;
   border-radius: 9px;
-  background: #faf6ee;
+  background: #f8f5ee;
   border: 1px solid var(--line);
 }
 .brk.open {
@@ -763,11 +763,11 @@ function askAi(course?: string) {
   white-space: nowrap;
 }
 .brk-state.red {
-  background: #fef2f2;
+  background: #f9e8e5;
   color: var(--red);
 }
 .brk-state.green {
-  background: #ecfdf5;
+  background: #e2efe9;
   color: var(--green);
 }
 .course-foot {
@@ -830,15 +830,15 @@ function askAi(course?: string) {
   color: var(--text-2);
 }
 .mini-state.full {
-  background: #ecfdf5;
+  background: #e2efe9;
   color: var(--green);
 }
 .mini-state.fuzzy {
-  background: #fffbeb;
+  background: #f9efdf;
   color: var(--amber);
 }
 .mini-state.lost {
-  background: #fef2f2;
+  background: #f9e8e5;
   color: var(--red);
 }
 .mini-detail {

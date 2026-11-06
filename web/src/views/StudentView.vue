@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
-import ChatHome from "@/components/ChatHome.vue";
+import PortalHome from "@/components/portal/PortalHome.vue";
 import CourseTrend from "@/components/CourseTrend.vue";
-import DashNav from "@/components/DashNav.vue";
 import RegionBand from "@/components/RegionBand.vue";
 import FactorBars from "@/components/FactorBars.vue";
 import GradeTrend from "@/components/GradeTrend.vue";
@@ -18,6 +18,15 @@ import type { AttendanceRecord, Course, HomeworkRecord, StudentDetail } from "@/
 const app = useAppStore();
 const auth = useAuthStore();
 const chat = useChatStore();
+const route = useRoute();
+
+/**
+ * 门户首屏与看板版块共用这一个组件：
+ * 没有 section 就是首屏（整页只有画布），有 section 就只渲染那一块。
+ * 版块是独立路由，所以「点节点」是真正换页面，不是原地滚动。
+ */
+const sec = computed(() => (route.meta.section as string) || "");
+
 const detail = ref<StudentDetail | null>(null);
 const loading = ref(true);
 const error = ref("");
@@ -75,7 +84,7 @@ function failOf(course: Course) {
   return p ? p.fail_probability : 0;
 }
 function failColor(p: number) {
-  return p > 0.5 ? "var(--red)" : p > 0.25 ? "#d97706" : "var(--green)";
+  return p > 0.5 ? "var(--red)" : p > 0.25 ? "#a9681f" : "var(--green)";
 }
 
 /* ---------------- 成绩走势 ---------------- */
@@ -176,12 +185,10 @@ async function submitAppeal() {
 </script>
 
 <template>
-  <!-- 对话是主入口：进来就是整页 AI 问答，学情档案按键前往 -->
-  <ChatHome v-if="chat.homeMode === 'chat'" role="student" :sid="sid || null" />
+  <!-- 首屏图形门户：整页只有画布，入口就是清单上的那几条；看板各版块是独立页面 -->
+  <PortalHome v-if="!sec" role="student" :sid="sid || null" />
 
   <template v-else>
-    <DashNav />
-
     <div v-if="loading" class="card">
       <div class="skeleton" style="height: 148px"></div>
     </div>
@@ -193,6 +200,7 @@ async function submitAppeal() {
   </div>
 
   <div v-else-if="detail">
+    <template v-if="sec === 'overview'">
     <RegionBand no="01" title="学业总览" tone="risk"
       desc="六因素加权算出来的一个数，每一分的来源都能往下追" />
 
@@ -237,8 +245,10 @@ async function submitAppeal() {
         </div>
       </div>
     </div>
+    </template>
 
     <!-- 成绩走势：五个学期一条线，外加本学期每门课的测评 -->
+    <template v-if="sec === 'grade'">
     <RegionBand id="grade" no="02" title="成绩与趋势" tone="archive"
       desc="五个学期一条线，外加本学期每门课的测评走势" />
 
@@ -281,8 +291,10 @@ async function submitAppeal() {
         测评分数直接来自课程平台，期中成绩同时参与风险评分；随堂测不计入风险分，但能提前看出趋势。
       </p>
     </div>
+    </template>
 
     <!-- 因素 / 行动 -->
+    <template v-if="sec === 'overview'">
     <RegionBand id="risk" no="03" title="风险归因与行动" tone="risk"
       desc="为什么是这个等级，以及这周具体做哪几件事" />
 
@@ -306,8 +318,10 @@ async function submitAppeal() {
         <ActionList :actions="detail.actions" />
       </div>
     </div>
+    </template>
 
     <!-- 课程明细 -->
+    <template v-if="sec === 'records'">
     <RegionBand id="records" no="04" title="课程 · 考勤 · 作业" tone="archive"
       desc="每门课的挂科概率、逐日考勤、作业截止与任课老师联系方式" />
 
@@ -492,6 +506,9 @@ async function submitAppeal() {
     </div>
 
     <!-- 申诉入口：AI 不能单方面决定学生命运 -->
+    </template>
+
+    <template v-if="sec === 'appeal'">
     <RegionBand id="appeal" no="05" title="复核与异议" tone="ai"
       desc="任何预警都要经过人工核实，十秒就能提一条" />
 
@@ -537,6 +554,7 @@ async function submitAppeal() {
         </div>
       </div>
     </div>
+    </template>
   </div>
   </template>
 </template>
@@ -558,7 +576,7 @@ async function submitAppeal() {
 .ask-ai {
   flex: none;
   border: 1px solid #f0d9b5;
-  background: #fdf1de;
+  background: #e3ece7;
   color: #4338ca;
   font-size: 11.5px;
   font-weight: 600;
@@ -596,13 +614,13 @@ async function submitAppeal() {
 }
 .ct-chip.up {
   border-color: rgba(4, 120, 87, 0.25);
-  background: var(--green-soft, #ecfdf5);
-  color: var(--green, #047857);
+  background: var(--green-soft, #e2efe9);
+  color: var(--green, #17604f);
 }
 .ct-chip.down {
   border-color: rgba(220, 38, 38, 0.25);
-  background: var(--red-soft, #fef2f2);
-  color: var(--red, #dc2626);
+  background: var(--red-soft, #f9e8e5);
+  color: var(--red, #b3261e);
 }
 
 /* ---------------- 任课老师 ---------------- */
@@ -640,7 +658,7 @@ async function submitAppeal() {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--brand-soft, rgba(37, 99, 235, 0.1));
-  color: var(--brand, #b45309);
+  color: var(--brand, #16564a);
   white-space: nowrap;
   max-width: 52%;
   overflow: hidden;
@@ -659,7 +677,7 @@ async function submitAppeal() {
   line-height: 1.7;
 }
 .teacher-meta a {
-  color: var(--brand, #b45309);
+  color: var(--brand, #16564a);
   text-decoration: none;
   word-break: break-all;
 }
@@ -687,8 +705,8 @@ async function submitAppeal() {
   cursor: pointer;
 }
 .chip.on {
-  border-color: var(--brand, #b45309);
-  color: var(--brand, #b45309);
+  border-color: var(--brand, #16564a);
+  color: var(--brand, #16564a);
   background: var(--brand-soft, rgba(37, 99, 235, 0.08));
 }
 .empty-line {
@@ -740,19 +758,19 @@ async function submitAppeal() {
   color: var(--brand);
 }
 .rec.absent {
-  border-left-color: var(--red, #dc2626);
+  border-left-color: var(--red, #b3261e);
   background: rgba(220, 38, 38, 0.04);
 }
 .rec.late {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
   background: rgba(217, 119, 6, 0.04);
 }
 .rec.hw.missing {
-  border-left-color: var(--red, #dc2626);
+  border-left-color: var(--red, #b3261e);
   background: rgba(220, 38, 38, 0.04);
 }
 .rec.hw.late {
-  border-left-color: #d97706;
+  border-left-color: #a9681f;
 }
 .rec-when,
 .rec-what {
@@ -779,16 +797,16 @@ async function submitAppeal() {
 .pill.absent,
 .pill.missing {
   background: rgba(220, 38, 38, 0.12);
-  color: var(--red, #dc2626);
+  color: var(--red, #b3261e);
 }
 .pill.late {
   background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
+  color: #16564a;
 }
 .pill.present,
 .pill.submitted {
   background: rgba(22, 163, 74, 0.12);
-  color: var(--green, #16a34a);
+  color: var(--green, #17604f);
 }
 
 @media (max-width: 900px) {
