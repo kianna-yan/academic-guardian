@@ -1216,6 +1216,45 @@ a {
   font-size: 10.5px;
   line-height: 1.5;
 }
+/* 提示词面板：选中项高亮，底部一条「添加」把整段话落进输入框 */
+.ch-sub.ch-prompts .sub-item.picked {
+  background: var(--brand-soft);
+  outline: 1px solid rgba(22, 86, 74, 0.28);
+}
+.ch-sub.ch-prompts .sub-item .sub-ic {
+  font-size: 11px;
+  letter-spacing: -1px;
+  color: var(--brand);
+}
+.ch-sub.ch-prompts .sub-item.picked .sub-ic {
+  letter-spacing: 0;
+  font-weight: 700;
+}
+.ch-sub.ch-prompts .prompt-add-row {
+  position: sticky;
+  bottom: -6px;
+  padding: 6px 4px 2px;
+  background: #fff;
+}
+.ch-sub.ch-prompts .prompt-add {
+  width: 100%;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ch-sub.ch-prompts .prompt-add:hover {
+  filter: brightness(1.06);
+}
+.ch-sub.ch-prompts .prompt-add:disabled {
+  background: #e4dccb;
+  color: #9a8c74;
+  cursor: not-allowed;
+}
 /* 窄屏没有右侧空间：二级菜单就地展开，别跑出屏幕 */
 @media (max-width: 720px) {
   .ch-sub {

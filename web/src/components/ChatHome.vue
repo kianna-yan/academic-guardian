@@ -7,6 +7,7 @@ import TraceSteps from "@/components/TraceSteps.vue";
 import { useChatStore, DEFAULT_SUGGEST } from "@/stores/chat";
 import { useAppStore } from "@/stores/app";
 import { api } from "@/api/client";
+import { PORTAL_PROMPTS } from "@/config/prompts";
 import {
   humanSize,
   pickImage,
@@ -335,13 +336,19 @@ function cleanupRec() {
 }
 
 function send(text: string) {
-  const content = (text ?? "").trim();
+  const typed = (text ?? "").trim();
   const media = attachments.value;
+  // 挂着的提示词胶囊在这一刻才展开成全文，拼在用户输入前面
+  const prompts = promptTags.value
+    .map((t) => promptText(t))
+    .filter(Boolean);
+  const content = [...prompts, typed].filter(Boolean).join("\n\n").trim();
   if (!content && !media.length) return;
   if (chat.streaming) return;
   const pick = pendingSkill.value;
   draft.value = "";
   attachments.value = [];
+  promptTags.value = [];
   pendingSkill.value = null;
   cleanupRec();
   chat.send(props.role, props.sid, content, media, pick ? { key: pick.skill.key, sub: pick.sub?.key } : null);
@@ -429,6 +436,7 @@ async function loadSkills() {
 function openDoc() {
   menuOpen.value = false;
   skillOpen.value = false;
+  promptOpen.value = false;
   docInput.value?.click();
 }
 
@@ -480,8 +488,71 @@ async function blobDetail(e: any): Promise<string> {
 function toggleSkill() {
   void loadSkills();
   skillOpen.value = !skillOpen.value;
+  promptOpen.value = false;
   if (!skillOpen.value) skillDrill.value = null;
 }
+
+/* ------------------------------------------------------------------
+ * 预置提示词：每个端一份「按需写好的提问模板」。
+ * 点「添加」后输入框里只落一枚【标签】胶囊，完整内容悬停胶囊即可查看；
+ * 发送时才把选中的提示词全文拼在用户输入的前面一起发出去。
+ * ---------------------------------------------------------------- */
+const promptOpen = ref(false);
+const promptPicked = ref<number | null>(null);
+const promptList = computed(() => PORTAL_PROMPTS[props.role] ?? []);
+/** 已添加到输入框的提示词标签（只存 tag，全文发送时再查） */
+const promptTags = ref<string[]>([]);
+
+function togglePrompt() {
+  promptOpen.value = !promptOpen.value;
+  skillOpen.value = false;
+  skillDrill.value = null;
+  promptPicked.value = null;
+}
+
+/** 选中的提示词以胶囊形式挂在输入框上方，重复添加只留一条 */
+function addPrompt() {
+  const p = promptPicked.value != null ? promptList.value[promptPicked.value] : null;
+  if (!p) return;
+  if (!promptTags.value.includes(p.tag)) {
+    promptTags.value = [...promptTags.value, p.tag];
+  }
+  promptOpen.value = false;
+  promptPicked.value = null;
+  menuOpen.value = false;
+  nextTick(() => draftEl.value?.focus());
+}
+
+function removePromptTag(tag: string) {
+  promptTags.value = promptTags.value.filter((t) => t !== tag);
+}
+
+/** 悬停胶囊时展示的完整提示词内容 */
+function promptText(tag: string): string {
+  return promptList.value.find((p) => p.tag === tag)?.text ?? "";
+}
+
+/** 面板里悬停某条提示词时，在旁边浮出完整内容（fixed 定位，避免被滚动面板裁剪） */
+const hoverTip = ref<{ x: number; y: number; tag: string; text: string } | null>(null);
+
+function showHoverTip(e: MouseEvent, p: { tag: string; text: string }) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 24);
+  let x = r.right + 10;
+  if (x + w > window.innerWidth - 8) x = r.left - w - 10;
+  if (x < 8) x = 8;
+  const y = Math.min(Math.max(r.top - 6, 8), Math.max(8, window.innerHeight - 250));
+  hoverTip.value = { x, y, tag: p.tag, text: p.text };
+}
+
+function hideHoverTip() {
+  hoverTip.value = null;
+}
+
+/** 输入框有字、有附件或挂着提示词胶囊，都可以发送 */
+const canSend = computed(
+  () => Boolean(draft.value.trim()) || attachments.value.length > 0 || promptTags.value.length > 0,
+);
 
 /** 有二级项的（文书类型 / 家长类型）先在菜单里选，别把 6 个文书塞进一级菜单 */
 function chooseSkill(s: SkillMeta) {
@@ -551,6 +622,7 @@ function onDocClick() {
   menuOpen.value = false;
   skillOpen.value = false;
   skillDrill.value = null;
+  promptOpen.value = false;
 }
 watch(menuOpen, (v) => {
   if (v) document.addEventListener("click", onDocClick);
@@ -738,6 +810,18 @@ function intentLabel(v: string): string {
             </div>
           </div>
 
+          <!-- 已添加的预置提示词：输入框里只显示【标签】胶囊，悬停看全文，可单个移除 -->
+          <div v-if="promptTags.length" class="ch-ptags">
+            <div v-for="t in promptTags" :key="t" class="ch-ptag" tabindex="0">
+              <span class="pt-label">【{{ t }}】</span>
+              <button type="button" class="pt-x" title="移除" @click="removePromptTag(t)">×</button>
+              <div class="pt-tip" role="tooltip">
+                <b>【{{ t }}】</b>
+                <p>{{ promptText(t) }}</p>
+              </div>
+            </div>
+          </div>
+
           <!-- 录音中：整条输入区变成微信那样的「松开发送 / 上滑取消」 -->
           <div v-if="recording" class="ch-voice" :class="{ 'will-cancel': willCancel }">
             <span class="ch-voice-wave"><i></i><i></i><i></i><i></i><i></i></span>
@@ -856,6 +940,35 @@ function intentLabel(v: string): string {
                     </span>
                   </button>
 
+                  <!-- 预置提示词：按端预写好的提问模板，选中后点「添加」落进输入框 -->
+                  <button
+                    type="button"
+                    class="has-sub"
+                    :class="{ on: promptOpen }"
+                    @click.stop="togglePrompt"
+                  >
+                    <span class="ic">
+                      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                        <path
+                          d="M4.5 5.5h15a1.4 1.4 0 0 1 1.4 1.4v8.2a1.4 1.4 0 0 1-1.4 1.4H12l-4.2 3.4v-3.4H4.5a1.4 1.4 0 0 1-1.4-1.4V6.9a1.4 1.4 0 0 1 1.4-1.4z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M8 10h8M8 13h5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="tx"><b>提示词</b><i>预写好的专业提问，选了就能发</i></span>
+                    <span class="arr">›</span>
+                  </button>
+
                   <!-- Skill：右侧展开二级菜单；文书/家校沟通有第二层（类型） -->
                   <button
                     type="button"
@@ -927,6 +1040,53 @@ function intentLabel(v: string): string {
                       </template>
                     </div>
                   </transition>
+
+                  <!-- 提示词二级面板：列表选一条，底部「添加」落进输入框 -->
+                  <transition name="ch-pop">
+                    <div v-if="promptOpen" class="ch-sub ch-prompts" @click.stop>
+                      <div class="sub-head">选一条提示词</div>
+                      <button
+                        v-for="(p, i) in promptList"
+                        :key="p.tag"
+                        type="button"
+                        class="sub-item"
+                        :class="{ picked: promptPicked === i }"
+                        @click="promptPicked = promptPicked === i ? null : i"
+                        @mouseenter="showHoverTip($event, p)"
+                        @mouseleave="hideHoverTip"
+                      >
+                        <span class="sub-ic pt-ic" :class="{ on: promptPicked === i }">
+                          <svg
+                            v-if="promptPicked !== i"
+                            viewBox="0 0 24 24"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.2"
+                            stroke-linecap="round"
+                          >
+                            <path d="M4 6h16M4 12h16M4 18h9" />
+                          </svg>
+                          <template v-else>✓</template>
+                        </span>
+                        <span class="tx">
+                          <b>【{{ p.tag }}】</b>
+                          <i>{{ p.desc }}</i>
+                        </span>
+                      </button>
+                      <div class="prompt-add-row">
+                        <button
+                          type="button"
+                          class="prompt-add"
+                          :disabled="promptPicked == null"
+                          @click="addPrompt"
+                        >
+                          {{ promptPicked == null ? "先选一条" : "添加到输入框" }}
+                        </button>
+                      </div>
+                    </div>
+                  </transition>
                 </div>
               </transition>
             </div>
@@ -967,7 +1127,7 @@ function intentLabel(v: string): string {
             <button
               type="submit"
               class="ch-send"
-              :disabled="chat.streaming || recording || (!draft.trim() && !attachments.length)"
+              :disabled="chat.streaming || recording || !canSend"
               data-test="chat-send"
               :title="chat.streaming ? '正在回答…' : '发送'"
               aria-label="发送"
@@ -1011,6 +1171,18 @@ function intentLabel(v: string): string {
       </div>
     </div>
   </section>
+
+  <!-- 面板悬停浮卡：挂到 body 上，fixed 定位跟着条目走，不受面板滚动裁剪 -->
+  <Teleport to="body">
+    <div
+      v-if="hoverTip"
+      class="pt-fly"
+      :style="{ left: hoverTip.x + 'px', top: hoverTip.y + 'px' }"
+    >
+      <b>【{{ hoverTip.tag }}】</b>
+      <p>{{ hoverTip.text }}</p>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1130,6 +1302,125 @@ function intentLabel(v: string): string {
 }
 .ch-skilltag button:hover {
   color: #16564a;
+}
+
+/* 预置提示词胶囊：只显示【标签】，悬停浮出完整内容 */
+.ch-ptags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ch-ptag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 9px;
+  border: 1px solid #e2b884;
+  border-radius: 9px;
+  background: #fdf7ec;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a5a1f;
+  cursor: default;
+}
+.pt-x {
+  border: 0;
+  background: transparent;
+  color: #b08a5a;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.pt-x:hover {
+  color: #9c231c;
+}
+.pt-tip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 9px);
+  width: min(340px, 72vw);
+  padding: 10px 12px;
+  border: 1px solid #ecdfc9;
+  border-radius: 10px;
+  background: #fffdf8;
+  box-shadow: 0 10px 28px rgba(35, 38, 31, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+  pointer-events: none;
+  z-index: 40;
+}
+.pt-tip::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 100%;
+  border: 6px solid transparent;
+  border-top-color: #fffdf8;
+}
+.ch-ptag:hover .pt-tip,
+.ch-ptag:focus-within .pt-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.pt-tip b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #16564a;
+}
+.pt-tip p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.65;
+  font-weight: 400;
+  color: #5c5344;
+  white-space: pre-line;
+}
+
+/* 面板条目的图标：干净的清单线条，选中变对勾 */
+.ch-sub.ch-prompts .sub-item .sub-ic.pt-ic {
+  background: #f1ece1;
+  color: #5c7a68;
+}
+.ch-sub.ch-prompts .sub-item .sub-ic.pt-ic.on {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 700;
+}
+
+/* 面板悬停浮卡：teleport 到 body，fixed 定位 */
+.pt-fly {
+  position: fixed;
+  /* 对话面板是 2200 的层，浮卡必须更高才压得住 */
+  z-index: 3000;
+  width: min(340px, 78vw);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid #ecdfc9;
+  border-radius: 10px;
+  background: #fffdf8;
+  box-shadow: 0 10px 28px rgba(35, 38, 31, 0.14);
+  pointer-events: none;
+}
+.pt-fly b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #16564a;
+}
+.pt-fly p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: #5c5344;
+  white-space: pre-line;
 }
 
 /* 技能产出的文件卡：生成中占位，好了直接下载 */
