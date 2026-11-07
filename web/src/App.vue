@@ -5,6 +5,7 @@ import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { ElNotification } from "element-plus/es/components/notification/index";
 import PasswordDialog from "@/components/PasswordDialog.vue";
+import StarWipe from "@/components/StarWipe.vue";
 import TopBar from "@/components/TopBar.vue";
 import AiSheet from "@/components/portal/AiSheet.vue";
 import { fetchLlmStatus, type LlmStatus } from "@/api/client";
@@ -51,6 +52,36 @@ const pageTitle = computed(() => (isHome.value ? "" : String(route.meta.title ||
 function backHome() {
   void router.push(HOME_OF[role.value] || "/student");
 }
+
+/**
+ * 端口开屏（星坠揭幕）。
+ *
+ * 只在「进入某个端」的那一刻播：点击端入口、登录后落到自己的端、从内页退回门户。
+ * 端内部换看板不播——那只是同一个人在同一张桌面前挪了下位置，每次点节点都
+ * 遮 1.8 秒会变成等待。
+ */
+const wipeSeq = ref(0);
+let lastWipePath = "";
+watch(
+  () => [route.path, !!auth.profile] as const,
+  ([path, hasProfile]) => {
+    if (route.name === "login") {
+      lastWipePath = "";
+      return;
+    }
+    if (!hasProfile) return;
+    if (!route.meta.home) {
+      // 进了端内部：清掉记录，下次回到端口入口重新播
+      lastWipePath = "";
+      return;
+    }
+    // 同一路径的 query 变化（如 blocked 提示）不算重新进端
+    if (path === lastWipePath) return;
+    lastWipePath = path;
+    wipeSeq.value++;
+  },
+  { immediate: true },
+);
 
 
 // 切端 / 换账号时都重置对话面板：角色和账号任一变化都要换会话，
@@ -265,6 +296,9 @@ onUnmounted(() => {
 
     <PasswordDialog v-model="pwdOpen" />
   </div>
+
+  <!-- 端口开屏：挂在应用层、Teleport 到 body，盖住导航栏与抽屉，开场统一由它接管 -->
+  <StarWipe :seq="wipeSeq" />
   </el-config-provider>
 </template>
 

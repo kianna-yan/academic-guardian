@@ -5,6 +5,7 @@ import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore, HOME_OF } from "@/stores/auth";
 import type { Role } from "@/types";
+import skyBg from "@/assets/login-sky.webp";
 
 const app = useAppStore();
 const auth = useAuthStore();
@@ -113,6 +114,39 @@ function switchRole(key: Role) {
   error.value = "";
 }
 
+/**
+ * 背景上的几颗星：只做点缀，刻意避开左栏文案与右侧登录卡。
+ * 位置用百分比，换屏宽时按比例跟着走；尺寸/周期用 px、s。
+ * 周期取 6s 和 3s（互为约数），相位用负延迟错开，才是此起彼伏地闪，
+ * 而不是几颗一起亮、一起灭。
+ */
+const SKY_STARS = [
+  { x: "10.5%", y: "3.4%", size: 18, dur: 6, delay: -1.6, peak: 0.92 }, // 左上主星
+  { x: "31.4%", y: "8.4%", size: 14, dur: 6, delay: -3.4, peak: 0.8 },
+  { x: "46.4%", y: "2.2%", size: 10, dur: 3, delay: -1.2, peak: 0.62 },
+  { x: "67.9%", y: "3%", size: 15, dur: 6, delay: -4.8, peak: 0.75 }, // 登录卡正上方
+  { x: "1.1%", y: "36%", size: 10, dur: 6, delay: -2.4, peak: 0.52 }, // 左页边
+  // 再补三颗：高低错开、大小不一，让天顶看起来是随手撒的，而不是排过队。
+  // 位置都避开了标题与正文的实字范围：左侧那颗压在天际线上方，
+  // 中间那颗落在标题右侧的空白里，右边那颗贴着登录卡的左肩。
+  { x: "6.4%", y: "4.4%", size: 12, dur: 6, delay: -0.9, peak: 0.62 }, // 左上角，比邻居低一头
+  { x: "40.2%", y: "12.6%", size: 9, dur: 3, delay: -2.7, peak: 0.5 }, // 标题右侧的碎星
+  { x: "48.4%", y: "6.1%", size: 14, dur: 6, delay: -4.2, peak: 0.68 }, // 登录卡左肩，位置更高
+];
+
+const bgStyle = computed(() => ({ "--sky": `url(${skyBg})` }));
+
+function starStyle(s: (typeof SKY_STARS)[number]) {
+  return {
+    left: s.x,
+    top: s.y,
+    "--sz": `${s.size}px`,
+    "--d": `${s.dur}s`,
+    "--dl": `${s.delay}s`,
+    "--op": `${s.peak}`,
+  };
+}
+
 onMounted(() => {
   // 从被拦截的地址过来时，提示一下而不是默默跳走
   const blocked = route.query.blocked;
@@ -171,39 +205,48 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 
 <template>
   <div class="login-page">
-    <div class="login-bg" aria-hidden="true"></div>
+    <!-- 背景插画与星空跟内容一起铺在这块"舞台"上：滚轮动的时候整张画跟着走，
+         而不是钉在视口里让文字从画上滑过去 -->
+    <div class="login-stage">
+      <div class="login-bg" aria-hidden="true" :style="bgStyle"></div>
+      <div class="login-sky" aria-hidden="true">
+        <i v-for="(s, i) in SKY_STARS" :key="i" class="st" :style="starStyle(s)"></i>
+      </div>
 
-    <div class="login-shell">
-      <!-- 左：品牌与说明 -->
-      <section class="login-intro">
-        <div class="brand">
-          <div class="brand-mark">护</div>
-          <div class="brand-text">
-            <strong>学业护航</strong>
-            <span>Academic Guardian</span>
+      <div class="login-shell">
+        <!-- 左：品牌与说明 -->
+        <section class="login-intro">
+          <div class="brand-row">
+            <div class="brand">
+              <div class="brand-mark">护</div>
+              <div class="brand-text">
+                <strong>学业护航</strong>
+                <span>Academic Guardian</span>
+              </div>
+            </div>
+
+            <!-- 学年/周次/人数挪到品牌这一行：原来压在左栏底部，正好盖在小女孩脸上 -->
+            <div class="login-meta">
+              <span>{{ app.meta?.term || "2024-2025 学年" }}</span>
+              <span v-if="app.meta?.week">第 {{ app.meta.week }} 教学周</span>
+              <span>{{ app.meta?.student_count || 240 }} 名学生</span>
+            </div>
           </div>
-        </div>
 
-        <h1>五个入口，各看各的</h1>
-        <p class="lead">
-          学生自查、辅导员跟进、教务定规则、家长知情、任课教师盯课堂。每个端用各自的账号登录，
-          看到的范围和可执行的动作都不同，数据不出角色边界。
-        </p>
+          <h1>五个入口，各看各的</h1>
+          <p class="lead">
+            学生自查、辅导员跟进、教务定规则、家长知情、任课教师盯课堂。每个端用各自的账号登录，
+            看到的范围和可执行的动作都不同，数据不出角色边界。
+          </p>
 
-        <ul class="points">
-          <li><b>学生端</b> 用学号登录，只看自己的风险构成与补救建议</li>
-          <li><b>辅导员端</b> 看本班名单排序、谈话要点与跟进记录</li>
-          <li><b>教务端</b> 配置预警线、批量开通学生账号、导出全校名单</li>
-          <li><b>家长端</b> 用孩子学号登录，只看孩子的状态与配合方式</li>
-          <li><b>教师端</b> 用工号登录，看自己课上学生的考勤、作业与风险</li>
-        </ul>
-
-        <div class="login-meta">
-          <span>{{ app.meta?.term || "2024-2025 学年" }}</span>
-          <span v-if="app.meta?.week">第 {{ app.meta.week }} 教学周</span>
-          <span>{{ app.meta?.student_count || 240 }} 名学生</span>
-        </div>
-      </section>
+          <ul class="points">
+            <li><b>学生端</b> 用学号登录，只看自己的风险构成与补救建议</li>
+            <li><b>辅导员端</b> 看本班名单排序、谈话要点与跟进记录</li>
+            <li><b>教务端</b> 配置预警线、批量开通学生账号、导出全校名单</li>
+            <li><b>家长端</b> 用孩子学号登录，只看孩子的状态与配合方式</li>
+            <li><b>教师端</b> 用工号登录，看自己课上学生的考勤、作业与风险</li>
+          </ul>
+        </section>
 
       <!-- 右：登录表单 -->
       <section class="login-card">
@@ -293,6 +336,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
           </p>
         </div>
       </section>
+      </div>
     </div>
   </div>
 </template>
@@ -300,31 +344,104 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 <style scoped>
 .login-page {
   position: relative;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 20px;
+  /* 固定一屏高、内部自己滚：窗口矮的时候（小笔记本、125% 缩放）整页能拖到底 */
+  height: 100vh;
+  height: 100dvh;
   background: #f6efe4;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
+/* 舞台 = 滚动的全部内容：至少一屏高，内容更高时跟着一起长，
+   插画铺在它上面，所以滚轮一动，画和字是同一张纸，一起走 */
+.login-stage {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  /* 顶部对齐而不是垂直居中：左栏文案整体上移，才能收在小女孩头顶之上；
+     居中时内容会被往下压 80px，正好压到她的头发上 */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(28px, 5vh, 52px) 20px 24px;
+}
+/* 背景：星空草坪插画（小女孩躺在左下角），左上方压一层极淡的米色给文案留白。
+   贴住舞台而不是视口：整页滚动时插画跟着一起卷，画面才是一整张，
+   同时永远按底部对齐——窗口再矮，小女孩也稳稳坐在草地尽头，不会骑到文字上 */
 .login-bg {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background:
-    radial-gradient(680px 320px at 12% 12%, #fdebd6 0%, transparent 60%),
-    radial-gradient(620px 300px at 88% 88%, #fdf3e3 0%, transparent 62%);
+    radial-gradient(
+      760px 420px at 26% 20%,
+      rgba(251, 246, 236, 0.92) 0%,
+      rgba(251, 246, 236, 0.72) 46%,
+      rgba(251, 246, 236, 0) 78%
+    ),
+    var(--sky) no-repeat center bottom;
+  background-size: auto, cover;
+}
+/* 星空层：几颗实心四角星，只做点缀，不接鼠标事件；同样长在画上，跟着一起滚 */
+.login-sky {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  --star: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='black' stroke='black' stroke-width='8' stroke-linejoin='round' d='M50 2C54 30 70 46 98 50 70 54 54 70 50 98 46 70 30 54 2 50 30 46 46 30 50 2Z'/%3E%3C/svg%3E");
+}
+.st {
+  position: absolute;
+  width: var(--sz);
+  height: var(--sz);
+  margin: calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);
+  background-color: #c88a6d;
+  -webkit-mask-image: var(--star);
+  mask-image: var(--star);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: star-twinkle var(--d) ease-in-out infinite;
+  animation-delay: var(--dl);
+  opacity: var(--op);
+}
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: calc(var(--op) * 0.26);
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: var(--op);
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st {
+    animation: none;
+    opacity: calc(var(--op) * 0.55);
+  }
 }
 .login-shell {
   position: relative;
+  z-index: 2;
   width: min(1080px, 100%);
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
   gap: 40px;
-  align-items: center;
+  /* 左栏与登录卡顶对齐：卡片本身就比左栏高，居中会把文案整体往下压 100px */
+  align-items: start;
 }
 
 /* 左侧 */
+/* 品牌与学年信息同一行：信息靠右，左边留给 logo，谁都不占小女孩的位置 */
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
 .login-intro .brand {
   display: flex;
   align-items: center;
@@ -357,7 +474,7 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   text-transform: uppercase;
 }
 .login-intro h1 {
-  margin: 26px 0 12px;
+  margin: 20px 0 10px;
   font-size: 30px;
   line-height: 1.25;
   color: var(--text);
@@ -365,16 +482,16 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 .lead {
   margin: 0;
   color: var(--text-2);
-  font-size: 14px;
-  line-height: 1.75;
+  font-size: 13.5px;
+  line-height: 1.72;
   max-width: 44em;
 }
 .points {
-  margin: 22px 0 0;
+  margin: 16px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 .points li {
   position: relative;
@@ -398,18 +515,19 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   color: var(--text);
 }
 .login-meta {
-  margin-top: 24px;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .login-meta span {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--muted);
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 3px 9px;
+  white-space: nowrap;
 }
 
 /* 右侧卡片 */
@@ -694,9 +812,19 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   .points {
     display: none;
   }
+  /* 小屏是单列长页，插画按 cover 铺开会把草地和人物拉得很大，压住正文；
+     这里退回纯色渐变，星星也一并收掉 */
+  .login-bg {
+    background:
+      radial-gradient(680px 320px at 12% 12%, #fdebd6 0%, transparent 60%),
+      radial-gradient(620px 300px at 88% 88%, #fdf3e3 0%, transparent 62%);
+  }
+  .login-sky {
+    display: none;
+  }
 }
 @media (max-width: 480px) {
-  .login-page {
+  .login-stage {
     padding: 18px 14px;
   }
   .login-card {
