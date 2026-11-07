@@ -2,18 +2,23 @@
 /**
  * 端口开屏：星坠 · 揭幕
  *
- * 序列（约 2.4s，无进度条，纯仪式感）：
+ * 序列（约 2.8s，无进度条，纯仪式感）：
  *   1. 0–260ms   整屏染成墨绿（--moss），页面沉到幕布后面
  *   2. 120ms     右上角亮起一颗四角星（与登录页同款实心星）
  *   3. 320ms     星星沿一条下坠的弧线掠向左下，身后拖出奶白痕迹
- *   4. 1440ms    星星抵达左下角，这颗星就是切口；两块绿幕沿弧线法向分开
- *   5. 2370ms    幕布离场，露出当前端口的真实内容
+ *   4. 1380ms    星星抵达左下角，这颗星就是切口
+ *   5. 1440ms→   **不是把幕布推开，而是让幕布从切口开始向两侧以渐变褪去**：
+ *                擦除带是一条贴着弧线生长的渐变蒙版——透明区 =
+ *                "到弧线的距离 ≤ r"的区域，r 匀速变大，边缘是十层灰阶
+ *                叠出的连续渐变（越远离切口越透）；切口全长同时开始化、
+ *                两块幕布按各自到最远角的距离缩放，同时化尽、同时结束
+ *   6. 2800ms    幕布散尽，露出当前端口的真实内容
  *
  * 几何全部由视口算：轨迹是一条二次贝塞尔弧（控制点朝左上鼓出：从右上角平着掠过天顶，
  * 越往左下越陡，像流星被重力拽下去），切口就是这条弧本身，
  * 所以任何分辨率下星星、奶白痕迹、幕布裂口三者严格重合。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{ seq: number }>();
 
@@ -22,9 +27,9 @@ const T = {
   starIn: 120, // 星星亮起
   flyStart: 320, // 起飞（= starIn + 200，留一次呼吸）
   flyDur: 1000, // 星星沿弧线飞完一趟
-  landPad: 120, // 落定后停一拍，再揭幕——"划到最左下角，然后才打开"
-  openDur: 860, // 幕布分开
-  tailPad: 70, // 收尾余量
+  landPad: 60, // 落定后几乎不停，立刻开始化幕（停久了像卡住）
+  openDur: 1300, // 幕布从切口化开、散尽
+  tailPad: 90, // 收尾余量
 };
 const openAt = T.flyStart + T.flyDur + T.landPad;
 
@@ -37,8 +42,10 @@ const open = ref(false);
 const reduce = ref(false);
 
 /**
- * 弧线几何（px）：S 右上角 → E 左下角，控制点 C 朝右下鼓出。
+ * 弧线几何（px）：S 右上角 → E 左下角，控制点 C 朝左上鼓出。
  * 同时给出两块幕布的裁剪路径——以这条弧为界，合起来严丝合缝。
+ * dA / dB 是两块幕布各自离弧线最远点的距离（外角到弧的最近距离），
+ * 化幕时两块分别按这个距离缩放擦除半径，才能同时化尽。
  */
 const geo = ref({
   w: 0,
@@ -53,15 +60,53 @@ const geo = ref({
   pa: "",
   pb: "",
   len: 0,
-  px: 0,
-  py: 0,
+  dA: 1,
+  dB: 1,
 });
 /** 星星当前位置 / 弧线已画出的长度 */
 const star = ref({ x: 0, y: 0 });
 const drawn = ref(0);
+/** 化幕进度 0→1：擦除半径 = 各自最大距离 × p，两块同步走完 */
+const meltP = ref(0);
+
+/** 渐变软边总宽（px）：擦除前沿到全透的距离，越大越像雾化褪去 */
+const FEATHER = 260;
+/** 软边灰阶层数：叠出渐变的骨架，台阶由高斯模糊抹平 */
+const STEPS = 8;
+/** 黑芯越过比例：擦除前沿在进度 82% 时抵达各块最远角，
+ *  剩下的时间让渐变软边扫过角落，保证收尾干净、不残留绿色 */
+const OVER = 0.82;
+
+/* 擦除前沿半径（px）：两边共用同一个进度 p，各按 dA/dB 缩放——
+   同时开始、同时抵达各自的角、同时结束 */
+const rA = computed(() => (geo.value.dA * meltP.value) / OVER);
+const rB = computed(() => (geo.value.dB * meltP.value) / OVER);
+
+/**
+ * 软边的灰阶环：从最宽最浅画到最窄最深，最后压一层黑芯。
+ * 每层提供一档透明度，叠起来就是「越远离擦除前沿越透」的线性渐变；
+ * 软边宽度随前沿半径一起从 0 长出来（前期 edge 偏脆、越化越柔），
+ * 进度为 0 时所有环宽度都是 0——幕布是完完整整的纯绿，不会有凭空的光晕。
+ */
+function rings(r: number): { w: number; c: string }[] {
+  const list: { w: number; c: string }[] = [];
+  const feather = FEATHER * Math.min(1, r / FEATHER);
+  for (let i = STEPS; i >= 1; i--) {
+    const g = Math.round((255 * i) / STEPS);
+    list.push({
+      w: 2 * r + (2 * feather * i) / STEPS,
+      c: `rgb(${g}, ${g}, ${g})`,
+    });
+  }
+  list.push({ w: 2 * r, c: "#000" });
+  return list;
+}
+const ringsA = computed(() => rings(rA.value));
+const ringsB = computed(() => rings(rB.value));
 
 let timers: number[] = [];
 let raf = 0;
+let meltRaf = 0;
 const at = (ms: number, fn: () => void) => {
   timers.push(window.setTimeout(fn, ms));
 };
@@ -71,6 +116,10 @@ const clear = () => {
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
+  }
+  if (meltRaf) {
+    cancelAnimationFrame(meltRaf);
+    meltRaf = 0;
   }
 };
 
@@ -91,16 +140,22 @@ function measure() {
   const cx = (sx + ex) / 2 - nx * k;
   const cy = (sy + ey) / 2 - ny * k;
 
-  // 弧长：采样累加，用于 stroke-dasharray 让痕迹随星星一起长出来
+  // 弧长 + 两块幕布离弧的最远距离：采样累加/取最小距离
+  // dA = 左上外角 (0,0) 到弧的最近距离，dB = 右下外角 (w,h) 到弧的最近距离。
+  // 化幕时 A/B 分别按 dA/dB 铺满擦除半径，两块才能同时化尽（弧不居中，两边距离不同）
   let len = 0;
+  let dA = Infinity;
+  let dB = Infinity;
   let px = sx;
   let py = sy;
-  for (let i = 1; i <= 64; i++) {
+  for (let i = 0; i <= 64; i++) {
     const t = i / 64;
     const mt = 1 - t;
     const x = mt * mt * sx + 2 * mt * t * cx + t * t * ex;
     const y = mt * mt * sy + 2 * mt * t * cy + t * t * ey;
-    len += Math.hypot(x - px, y - py);
+    if (i > 0) len += Math.hypot(x - px, y - py);
+    dA = Math.min(dA, Math.hypot(x, y));
+    dB = Math.min(dB, Math.hypot(x - w, y - h));
     px = x;
     py = y;
   }
@@ -121,12 +176,12 @@ function measure() {
     // 两块严丝合缝时浏览器抗锯齿会在接缝漏一条极细的底色线，压这一点就盖住了
     pb: `path('M${sx - nx * SEAM} ${sy - ny * SEAM}Q${cx - nx * SEAM} ${cy - ny * SEAM} ${ex - nx * SEAM} ${ey - ny * SEAM}L${w} ${h}Z')`,
     len,
-    // 沿法向推开：0.94 个另一条边长，足够把整块三角甩出屏幕
-    px: Math.round(h * 0.94),
-    py: Math.round(w * 0.94),
+    dA: Math.round(dA),
+    dB: Math.round(dB),
   };
   star.value = { x: sx, y: sy };
   drawn.value = 0;
+  meltP.value = 0;
 }
 
 /** 弧上一点（t ∈ [0,1]） */
@@ -152,6 +207,22 @@ function startFly() {
   raf = requestAnimationFrame(loop);
 }
 
+/**
+ * 化幕：只推进擦除半径，不给幕布加位移。
+ * 半径严格线性增长（匀速退潮）：擦除区面积 ∝ 弧长×半径，天然接近匀速，
+ * 不需要也不会出现"先僵一下再猛化"的节奏；两块幕布共用同一个 p，
+ * 半径各按 dA/dB 缩放，起点终点都严格对齐。
+ */
+function startMelt() {
+  const t0 = performance.now();
+  const loop = () => {
+    const p = Math.min(1, (performance.now() - t0) / T.openDur);
+    meltP.value = p;
+    meltRaf = p < 1 ? requestAnimationFrame(loop) : 0;
+  };
+  meltRaf = requestAnimationFrame(loop);
+}
+
 function play() {
   clear();
   measure();
@@ -170,6 +241,7 @@ function play() {
   at(openAt, () => {
     open.value = true;
     starIn.value = false;
+    startMelt();
   });
   at(openAt + T.openDur + T.tailPad, () => {
     active.value = false;
@@ -199,21 +271,70 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
+    <!-- 化幕蒙版的定义：白色矩形 = 可见，沿弧线的一组灰阶描边 = 渐变擦除。
+         灰阶层叠出渐变骨架，高斯模糊把台阶融成连续过渡；
+         擦除区 = 「到弧线的距离 ≤ r」的渐变带，波前永远贴着弧线的形状 -->
+    <svg v-if="active" class="sw-defs" width="0" height="0" aria-hidden="true">
+      <defs>
+        <filter id="swSoft" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="14" />
+        </filter>
+        <mask id="swmA" maskUnits="userSpaceOnUse" x="0" y="0" :width="geo.w" :height="geo.h">
+          <rect x="0" y="0" :width="geo.w" :height="geo.h" fill="#fff" />
+          <g filter="url(#swSoft)">
+            <path
+              v-for="(r, i) in ringsA"
+              :key="i"
+              :d="geo.d"
+              fill="none"
+              :stroke="r.c"
+              :stroke-width="r.w"
+              stroke-linecap="round"
+            />
+          </g>
+        </mask>
+        <mask id="swmB" maskUnits="userSpaceOnUse" x="0" y="0" :width="geo.w" :height="geo.h">
+          <rect x="0" y="0" :width="geo.w" :height="geo.h" fill="#fff" />
+          <g filter="url(#swSoft)">
+            <path
+              v-for="(r, i) in ringsB"
+              :key="i"
+              :d="geo.d"
+              fill="none"
+              :stroke="r.c"
+              :stroke-width="r.w"
+              stroke-linecap="round"
+            />
+          </g>
+        </mask>
+      </defs>
+    </svg>
+
     <div
       v-if="active"
       class="sw"
       :class="{ 'sw-open': open }"
-      :style="{ '--px': `${geo.px}px`, '--py': `${geo.py}px` }"
       aria-hidden="true"
     >
-      <!-- 两块绿幕：以那条弧为界，合起来严丝合缝，分开就是"被划开" -->
+      <!-- 两块绿幕：以那条弧为界，合起来严丝合缝。
+           化开时不动位置，各蒙一片贴着弧线生长的 SVG 擦除蒙版 -->
       <div
         class="sw-pane sw-pane-a"
-        :style="{ clipPath: geo.pa, webkitClipPath: geo.pa } as any"
+        :style="{
+          clipPath: geo.pa,
+          webkitClipPath: geo.pa,
+          maskImage: 'url(#swmA)',
+          WebkitMaskImage: 'url(#swmA)',
+        } as any"
       ></div>
       <div
         class="sw-pane sw-pane-b"
-        :style="{ clipPath: geo.pb, webkitClipPath: geo.pb } as any"
+        :style="{
+          clipPath: geo.pb,
+          webkitClipPath: geo.pb,
+          maskImage: 'url(#swmB)',
+          WebkitMaskImage: 'url(#swmB)',
+        } as any"
       ></div>
 
       <!-- 奶白痕迹：沿同一条弧画出来，长度由星星的进度驱动，尾端渐隐、头部实心 -->
@@ -263,6 +384,13 @@ onBeforeUnmount(() => {
 .sw-open {
   pointer-events: none;
 }
+/* 蒙版定义容器：0×0 但不能 display:none，否则部分浏览器不解析引用 */
+.sw-defs {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
 
 /* ---- 幕布 ---- */
 .sw-pane {
@@ -272,7 +400,7 @@ onBeforeUnmount(() => {
     radial-gradient(72% 58% at 74% 16%, #1d6a5b 0%, rgba(29, 106, 91, 0) 62%),
     linear-gradient(158deg, #1a6154 0%, #16564a 46%, #0e3d35 100%);
   animation: sw-veil 260ms ease-out both;
-  will-change: transform, opacity;
+  will-change: opacity;
 }
 @keyframes sw-veil {
   from {
@@ -282,35 +410,17 @@ onBeforeUnmount(() => {
     opacity: 1;
   }
 }
-.sw.sw-open .sw-pane-a {
-  animation: sw-open-a 860ms cubic-bezier(0.55, 0.02, 0.32, 1) both;
+/* 化幕不看 CSS 关键帧：擦除半径由脚本逐帧推进（见 coreA / coreB）。
+   这条淡出只是兜底——万一 SVG 蒙版没生效，幕布也不会永远卡在屏幕上；
+   正常播放时它落在蒙版已化得差不多的时候，看不出它在参与 */
+.sw.sw-open .sw-pane {
+  animation: sw-veil 260ms ease-out both, sw-lift 420ms ease-in 880ms both;
 }
-.sw.sw-open .sw-pane-b {
-  animation: sw-open-b 860ms cubic-bezier(0.55, 0.02, 0.32, 1) both;
-}
-@keyframes sw-open-a {
+@keyframes sw-lift {
   0% {
-    transform: translate(0, 0);
-    opacity: 1;
-  }
-  72% {
     opacity: 1;
   }
   100% {
-    transform: translate(calc(-1 * var(--px)), calc(-1 * var(--py)));
-    opacity: 0;
-  }
-}
-@keyframes sw-open-b {
-  0% {
-    transform: translate(0, 0);
-    opacity: 1;
-  }
-  72% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate(var(--px), var(--py));
     opacity: 0;
   }
 }
@@ -396,7 +506,8 @@ onBeforeUnmount(() => {
 
 /* 尊重系统偏好：不划星、不裂幕，只留一次淡出 */
 @media (prefers-reduced-motion: reduce) {
-  .sw-pane {
+  .sw-pane,
+  .sw.sw-open .sw-pane {
     animation: none;
   }
   .sw-star {
