@@ -56,7 +56,7 @@ export const MODULES: Record<Role, NavGroup[]> = {
       label: "我的成长",
       caption: "看得见",
       items: [
-        { key: "tree", label: "我的智慧树", en: "TREE", to: "/student/tree", hint: "一颗果实一门课，颜色看学科、光环看风险" },
+        { key: "tree", label: "我的智慧树", en: "TREE", to: "/student/tree", hint: "浇水＝到课、施肥＝作业，果实大小＝学分×成熟度" },
         { key: "simulate", label: "成绩分配试算", en: "SIMULATE", to: "/student/simulate", hint: "每一项你自己调，实时看会不会挂" },
         { key: "resources", label: "学习资源", en: "RESOURCES", to: "/student/resources", hint: "老师上传的历年真题与网课" },
       ],

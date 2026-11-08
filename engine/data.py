@@ -62,8 +62,20 @@ TEACHERS = {
 
 SESSIONS_HELD = 14          # 已上课次数（第 1-7 周，每周两次）
 SESSIONS_TOTAL = 16
-HOMEWORK_ASSIGNED = 6       # 已布置作业数
+HOMEWORK_ASSIGNED = 6       # 默认已布置作业数（各课不同时用下面的表）
 HOMEWORK_TOTAL = 8
+
+# 各课本学期留几次作业 —— 现实里差别很大：思政只有思考题，项目课前期只交需求文档，
+# 数学课每周都有习题。智慧树的果实按"该课完成率"算，所以这个差别必须真的存在，
+# 否则"作业少的课果实天生小"这个问题在演示里根本看不出来。
+HOMEWORK_COUNT = {
+    "CS201": 7,   # 数据结构：每章一次习题+实验
+    "CS203": 6,   # 计算机组成原理
+    "MA204": 7,   # 概率论：每周习题，已留 7 次
+    "EN203": 6,   # 大学英语：每单元一次
+    "PE201": 3,   # 马原（思政人文）：只有思考题/小论文，留得少
+    "CS215": 2,   # Python Web（项目制）：前期只交需求文档与原型
+}
 
 # 学期基线：第 8 教学周 = 2026-10-19 那一周，往前推 7 周为第 1 周
 WEEK1_MONDAY = date(2026, 8, 31)
@@ -82,17 +94,20 @@ TERMS = [
 QUIZ_WEEKS = [2, 3, 5, 6]
 MIDTERM_WEEK = 7
 
-# 作业模板：每门课 6 次，标题按章节推进，便于学生看懂"要交什么"
+# 作业模板：标题按章节推进，便于学生看懂"要交什么"。
+# 每门课留几次见 HOMEWORK_COUNT，模板比那个数长也没关系，多余的留着不用。
 HOMEWORK_PLAN = {
     "CS201": ["第 1 章 绪论 · 复杂度分析习题", "第 2 章 线性表 · 顺序表与链表实现",
               "第 3 章 栈与队列 · 表达式求值", "第 4 章 串与数组 · KMP 实现",
-              "第 5 章 树与二叉树 · 遍历与重建", "第 6 章 图 · 最短路与拓扑排序"],
+              "第 5 章 树与二叉树 · 遍历与重建", "第 6 章 图 · 最短路与拓扑排序",
+              "第 7 章 查找 · 平衡树与散列表实验"],
     "CS203": ["第 1 章 计算机系统概论 · 习题 1.3-1.9", "第 2 章 数据表示 · 浮点数转换实验",
               "第 3 章 运算方法与运算器 · ALU 设计", "第 4 章 存储系统 · Cache 命中率计算",
               "第 5 章 指令系统 · 汇编片段分析", "第 6 章 中央处理器 · 单周期 CPU 数据通路"],
     "MA204": ["第 1 章 概率论基本概念 · 习题", "第 2 章 随机变量及其分布 · 计算题",
               "第 3 章 多维随机变量 · 联合分布", "第 4 章 数字特征 · 期望与方差",
-              "第 5 章 大数定律与中心极限定理", "第 6 章 数理统计基础 · 参数估计"],
+              "第 5 章 大数定律与中心极限定理", "第 6 章 数理统计基础 · 参数估计",
+              "第 7 章 统计量与抽样分布 · 习题"],
     "EN203": ["Unit 1 Reading Report", "Unit 2 Listening & Note-taking",
               "Unit 3 Argumentative Essay (500 words)", "Unit 4 Presentation Script",
               "Unit 5 Translation Practice", "Unit 6 Academic Summary"],
@@ -369,13 +384,18 @@ def _attendance_detail(rng: random.Random, diligence: float, course: dict) -> li
 
 
 def _homework_detail(rng: random.Random, diligence: float, course: dict) -> list[dict]:
-    """作业清单：交给什么、什么时候交、交没交，一次说清。"""
+    """作业清单：交给什么、什么时候交、交没交，一次说清。
+
+    每门课留几次不一样（HOMEWORK_COUNT）：思政只有思考题，项目课前期只交需求文档，
+    数学课每周习题。次数差别必须体现在数据里，智慧树才谈得上"施肥程度不同怎么办"。
+    """
     titles = HOMEWORK_PLAN.get(course["code"], [f"第 {i} 次作业" for i in range(1, 7)])
     brief = HOMEWORK_BRIEF.get(course["code"], "按课程要求提交")
+    total = HOMEWORK_COUNT.get(course["code"], HOMEWORK_ASSIGNED)
     p_miss = _clamp((1 - diligence) * 0.42, 0.0, 0.62)
     rows: list[dict] = []
-    for i in range(HOMEWORK_ASSIGNED):
-        week = 1 + i                       # 第 1..6 周布置
+    for i in range(total):
+        week = 1 + i                       # 第 1..N 周布置
         assigned = WEEK1_MONDAY + timedelta(weeks=week - 1, days=4)   # 周五布置
         due = assigned + timedelta(days=10)                            # 下下周一截止
         r = rng.random()

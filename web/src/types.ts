@@ -1008,6 +1008,19 @@ export interface SimPayload {
 /* ------------------------------------------------------------------ */
 /* 智慧树：一颗果实一门课                                              */
 /* ------------------------------------------------------------------ */
+
+/** 水肥账：一个口径的"该做多少 / 做了多少 / 做得怎么样" */
+export interface FruitLedger {
+  /** 该做的量（作业=已截止次数；到课=已上节数） */
+  due: number;
+  /** 实际完成的量（迟到按 0.5 / 0.6 折算前的条数） */
+  done: number;
+  /** 真实完成率 0–1（标签上显示的那个百分比） */
+  rate: number;
+  /** 有效投入：含质量系数折算，用于生长 */
+  eff: number;
+}
+
 export interface TreeFruit {
   code: string;
   name: string;
@@ -1017,4 +1030,16 @@ export interface TreeFruit {
   status: "great" | "ok" | "watch" | "risk";
   /** 树上第几个挂点；不传则按数组顺序 */
   slot?: number;
+  /**
+   * 肥料成熟度 0.45–1.0。
+   * = 0.45 + 0.55 × 有效施肥 ÷ 已截止作业数
+   * 分母用真实次数、不做平滑：作业留得少的课交齐了就该熟，否则"留得少"反而成了它长不大的理由。
+   */
+  maturity: number;
+  /** 肥：作业账。null = 该课没有作业，改按到课与随堂折算 */
+  hw: FruitLedger | null;
+  /** 水：到课账（果实小标签里的"根"，也决定树干） */
+  attend: FruitLedger;
+  /** 果柄上的叶片数 = 学分 */
+  leaves: number;
 }

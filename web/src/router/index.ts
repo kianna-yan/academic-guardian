@@ -200,7 +200,7 @@ const router = createRouter({
       path: "/student/tree",
       name: "student-tree",
       component: () => import("@/views/TreeView.vue"),
-      meta: { title: "我的智慧树", sub: "一颗果实一门课：颜色看学科，光环看风险", role: "student" },
+      meta: { title: "我的智慧树", sub: "浇水＝到课（树干），施肥＝作业（果实）", role: "student" },
     },
     {
       path: "/student/simulate",
