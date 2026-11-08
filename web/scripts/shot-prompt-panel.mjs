@@ -1,0 +1,33 @@
+import puppeteer from "puppeteer-core";
+const EXE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const BASE = "http://127.0.0.1:8600";
+const r = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "teacher", account: "2024014501", password: "4444" }) });
+const token = (await r.json()).token;
+const b = await puppeteer.launch({ executablePath: EXE, headless: true, args: ["--no-sandbox", "--proxy-server=direct://", "--proxy-bypass-list=*"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1440, height: 900 });
+await p.evaluateOnNewDocument((x) => localStorage.setItem("ag.token", x), token);
+await p.goto(`${BASE}/teacher`, { waitUntil: "networkidle2" });
+await new Promise((s) => setTimeout(s, 3200));
+await p.evaluate(() => document.querySelectorAll(".el-notification").forEach((n) => n.remove()));
+await p.click(".ai-card .ai-input");
+await new Promise((s) => setTimeout(s, 900));
+await p.click(".ch-plus");
+await new Promise((s) => setTimeout(s, 350));
+await p.evaluate(() => {
+  const btn = [...document.querySelectorAll(".ch-menu button.has-sub")].find((x) => x.textContent.includes("提示词"));
+  btn.click();
+});
+await new Promise((s) => setTimeout(s, 400));
+await p.click(".ch-prompts .sub-item:nth-child(2)");
+await new Promise((s) => setTimeout(s, 300));
+const box = await p.evaluate(() => {
+  const m = document.querySelector(".ch-menu").getBoundingClientRect();
+  const s = document.querySelector(".ch-prompts").getBoundingClientRect();
+  const x = Math.min(m.x, s.x) - 12, y = Math.min(m.y, s.y) - 12;
+  return { x, y, w: Math.max(m.right, s.right) - x + 12, h: Math.max(m.bottom, s.bottom) - y + 12 };
+});
+console.log("box=", JSON.stringify(box));
+await p.screenshot({ path: "C:/tmp/prompt_panel_open.png", clip: { x: box.x, y: box.y, width: box.w, height: box.h } });
+console.log("ok", JSON.stringify(box));
+await b.close();
