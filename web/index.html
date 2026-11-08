@@ -89,9 +89,37 @@
           width: 100%;
         }
       }
+      /* 首屏开屏幕：直接打开某个端时，Vue 挂载到开屏动画起播之间有几百毫秒，
+         以前这段时间端口原样露在屏幕上（就是"闪一下"）。这块幕在 HTML 里、
+         和样式同一批解析，第一帧就盖住；开屏动画接手时立刻撤掉。 */
+      #boot-veil {
+        display: none;
+      }
+      html.v11-veil #boot-veil {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 10001;
+        background:
+          radial-gradient(72% 58% at 74% 16%, #1d6a5b 0%, rgba(29, 106, 91, 0) 62%),
+          linear-gradient(158deg, #1a6154 0%, #16564a 46%, #0e3d35 100%);
+      }
     </style>
+    <script>
+      // 落在某个端、本地又有登录态 → 先把幕布挂上（登录页不挂，那是另一个开屏）
+      (function () {
+        try {
+          var logged = !!localStorage.getItem("ag.token");
+          var port = /^\/(student|counselor|admin|parent|teacher)(\/|$)/.test(location.pathname);
+          if (logged && port) document.documentElement.className += " v11-veil";
+        } catch (e) {
+          /* 隐私模式下 localStorage 可能不可用，忽略即可 */
+        }
+      })();
+    </script>
   </head>
   <body>
+    <div id="boot-veil" aria-hidden="true"></div>
     <div id="app">
       <div class="boot" role="status" aria-live="polite">
         <div class="boot-ring" aria-hidden="true"></div>

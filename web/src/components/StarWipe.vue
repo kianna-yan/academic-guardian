@@ -20,7 +20,16 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-const props = defineProps<{ seq: number }>();
+const props = defineProps<{
+  seq: number;
+  /**
+   * 预备幕：路由一开始跳转就先立起来的不透明幕布。
+   * 有了它，目标端口的第一帧永远画在幕布后面，不会出现"
+   * 开屏播到一半却看见真实页面闪一下"。跳转失败/超时会由上层撤掉。
+   */
+  armed?: boolean;
+}>();
+const emit = defineEmits<{ (e: "start"): void; (e: "done"): void }>();
 
 /** 时间线（ms）：调这里就能整体调快慢，几何不用动 */
 const T = {
@@ -229,10 +238,14 @@ function play() {
   open.value = false;
   starIn.value = false;
   active.value = true;
+  emit("start");
 
   if (reduce.value) {
     // 系统开了"减少动态效果"：只做一次 220ms 的淡出，不划星不裂幕
-    at(240, () => (active.value = false));
+    at(240, () => {
+      active.value = false;
+      emit("done");
+    });
     return;
   }
 
@@ -246,6 +259,7 @@ function play() {
   at(openAt + T.openDur + T.tailPad, () => {
     active.value = false;
     measure();
+    emit("done");
   });
 }
 
@@ -311,14 +325,15 @@ onBeforeUnmount(() => {
     </svg>
 
     <div
-      v-if="active"
+      v-if="active || armed"
       class="sw"
-      :class="{ 'sw-open': open }"
+      :class="{ 'sw-open': open, 'sw-armed': !active }"
       aria-hidden="true"
     >
       <!-- 两块绿幕：以那条弧为界，合起来严丝合缝。
            化开时不动位置，各蒙一片贴着弧线生长的 SVG 擦除蒙版 -->
       <div
+        v-show="active"
         class="sw-pane sw-pane-a"
         :style="{
           clipPath: geo.pa,
@@ -328,6 +343,7 @@ onBeforeUnmount(() => {
         } as any"
       ></div>
       <div
+        v-show="active"
         class="sw-pane sw-pane-b"
         :style="{
           clipPath: geo.pb,
@@ -336,6 +352,9 @@ onBeforeUnmount(() => {
           WebkitMaskImage: 'url(#swmB)',
         } as any"
       ></div>
+
+      <!-- 预备幕：路由已经在跳、动画还没起，先铺一整块同色幕布把目标页盖住 -->
+      <div v-if="!active" class="sw-arm"></div>
 
       <!-- 奶白痕迹：沿同一条弧画出来，长度由星星的进度驱动，尾端渐隐、头部实心 -->
       <svg class="sw-arc" :width="geo.w" :height="geo.h" :viewBox="`0 0 ${geo.w} ${geo.h}`">
@@ -393,28 +412,23 @@ onBeforeUnmount(() => {
 }
 
 /* ---- 幕布 ---- */
-.sw-pane {
+/* 幕布从第一帧起就是不透明的：以前这里有一段 260ms 的淡入，
+   结果进入端口时真实页面会先在淡入的空档里露一下——那正是"闪一下"的来源。
+   开屏该是"啪"地盖下来，不是慢慢染绿。 */
+.sw-pane,
+.sw-arm {
   position: absolute;
   inset: 0;
   background:
     radial-gradient(72% 58% at 74% 16%, #1d6a5b 0%, rgba(29, 106, 91, 0) 62%),
     linear-gradient(158deg, #1a6154 0%, #16564a 46%, #0e3d35 100%);
-  animation: sw-veil 260ms ease-out both;
   will-change: opacity;
 }
-@keyframes sw-veil {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-/* 化幕不看 CSS 关键帧：擦除半径由脚本逐帧推进（见 coreA / coreB）。
+/* 化幕不看 CSS 关键帧：擦除半径由脚本逐帧推进（见 startMelt）。
    这条淡出只是兜底——万一 SVG 蒙版没生效，幕布也不会永远卡在屏幕上；
    正常播放时它落在蒙版已化得差不多的时候，看不出它在参与 */
 .sw.sw-open .sw-pane {
-  animation: sw-veil 260ms ease-out both, sw-lift 420ms ease-in 880ms both;
+  animation: sw-lift 420ms ease-in 880ms both;
 }
 @keyframes sw-lift {
   0% {

@@ -29,6 +29,15 @@ const stream = ref<HTMLElement | null>(null);
 /** 右下角那块「已接入大模型」的牌子：模型名直接读后端 /meta，不写死 */
 const modelName = computed(() => String(app.meta?.llm?.model || "").trim());
 const modelLine = computed(() => (modelName.value ? `${modelName.value} · 实时推理` : "学情数据 · 实时推理"));
+/**
+ * 第二个模型：后端 .env 里另配了一只快模型（LLM_ROUTE_MODEL），只负责
+ * 「这句话该调哪个工具」，首字延迟比主模型低一个量级。牌子上一并亮出来，
+ * 免得看的人以为只接了一个模型。
+ */
+const routeName = computed(() => String(app.meta?.llm?.route_model || "").trim());
+const routeLine = computed(() =>
+  routeName.value && routeName.value !== modelName.value ? `${routeName.value} · 意图路由` : "",
+);
 
 /** 每个端的整页对话：标题、副标题、以及收起按钮的文案 */
 const HOME: Record<Role, { title: string; sub: string; dash: string }> = {
@@ -757,6 +766,7 @@ function intentLabel(v: string): string {
         <div class="mm-tx">
           <b>已接入教育大模型</b>
           <i>{{ modelLine }}</i>
+          <i v-if="routeLine" class="mm-alt">{{ routeLine }}</i>
         </div>
       </div>
       <div class="chat-col">
@@ -1627,6 +1637,11 @@ function intentLabel(v: string): string {
   color: var(--muted);
   line-height: 1.5;
   word-break: break-all;
+}
+/* 第二只模型排在主模型下面，比第一行再淡一档：是补充说明，不抢主行 */
+.mm-tx i.mm-alt {
+  font-size: 9px;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
 /* 空间不够就先收起来，别压到输入框上 */
 @media (max-width: 1280px) {

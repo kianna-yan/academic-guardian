@@ -105,9 +105,26 @@ export const useNoticeStore = defineStore("notices", () => {
     void refreshMessages(silent);
   }
 
+  /**
+   * 进端口时的「报到式弹窗」：把当前未读的头部几条再报一遍。
+   *
+   * 与 refresh 的区别是它**不看 seen**。以前 seen 记着整场会话里弹过哪些 id，
+   * 于是第一次进端口弹过之后，第二次、第三次再进就一条都不弹了——
+   * 用起来就像「进端口根本没刷新」。
+   * 仍未读 = 还没处理，那就该每次进门都提醒一次；处理完（markRead）自然消失。
+   */
+  function popUnread(max = 3): NoticeItem[] {
+    const list = unread.value.slice(0, max);
+    // 记进 seen：25 秒那一轮轮询要是又拉到同一条，别再补弹一次
+    list.forEach((n) => seen.add(n.id));
+    return list;
+  }
+
   function start() {
     stop();
-    void refresh();
+    // 首屏这一趟走静默：进端口的弹窗统一由 App.vue 的「报到」逻辑触发。
+    // 两边都弹会让同一批消息在登录瞬间出现两遍。
+    void refresh(true);
     timer = window.setInterval(() => void refresh(), POLL_MS);
   }
 
@@ -207,7 +224,7 @@ export const useNoticeStore = defineStore("notices", () => {
     panelOpen, tab,
     threads, activeThread, messageUnread, canMessage, sending,
     refresh, start, stop, markRead, finishTodo, reopenTodo, removeTodo,
-    onArrive, openPanel,
+    onArrive, openPanel, popUnread,
     sendMessage, markThreadRead, refreshMessages,
   };
 });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { ElMessage } from "element-plus/es/components/message/index";
@@ -13,7 +13,7 @@ import { useAppStore } from "@/stores/app";
 import { HOME_OF, useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import { useNoticeStore } from "@/stores/notices";
-import type { Role } from "@/types";
+import type { NoticeItem, Role } from "@/types";
 
 const app = useAppStore();
 const auth = useAuthStore();
@@ -53,6 +53,82 @@ function backHome() {
   void router.push(HOME_OF[role.value] || "/student");
 }
 
+/* ------------------------------------------------------------------ */
+/* 返回门户：滚出视口后，自动变成一只可拖动的浮窗                        */
+/* ------------------------------------------------------------------ */
+
+const viewEl = ref<HTMLElement | null>(null);
+const backBarEl = ref<HTMLElement | null>(null);
+/** 原按钮是否已经被完全滚出内容区上沿 */
+const backHidden = ref(false);
+/** 浮窗位置（视口坐标）：默认还在左上，和原按钮同一侧，不用满屏找 */
+const floatPos = ref({ x: 22, y: 74 });
+/** 浮窗尺寸（与 .back-btn 一致：120×28 左右，留一点余量做边界夹取） */
+const FLOAT_W = 104;
+const FLOAT_H = 28;
+
+function clampFloat(x: number, y: number) {
+  const maxX = Math.max(8, window.innerWidth - FLOAT_W - 8);
+  const maxY = Math.max(8, window.innerHeight - FLOAT_H - 8);
+  return { x: Math.min(Math.max(8, x), maxX), y: Math.min(Math.max(8, y), maxY) };
+}
+
+/** 内容区滚动时算一次：按钮整条越过内容区上沿，就是"被完全挡住" */
+function readScroll() {
+  const view = viewEl.value;
+  const bar = backBarEl.value;
+  if (!view || !bar) {
+    backHidden.value = false;
+    return;
+  }
+  const vTop = view.getBoundingClientRect().top;
+  backHidden.value = bar.getBoundingClientRect().bottom <= vTop + 1;
+}
+
+let drag: { id: number; x0: number; y0: number; ox: number; oy: number; moved: boolean } | null = null;
+
+function onFloatDown(e: PointerEvent) {
+  const el = e.currentTarget as HTMLElement;
+  el.setPointerCapture(e.pointerId);
+  drag = {
+    id: e.pointerId,
+    x0: e.clientX,
+    y0: e.clientY,
+    ox: floatPos.value.x,
+    oy: floatPos.value.y,
+    moved: false,
+  };
+}
+function onFloatMove(e: PointerEvent) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.x0;
+  const dy = e.clientY - drag.y0;
+  // 4px 以内当手抖：既不算拖动，也不会吞掉这一次点击
+  if (!drag.moved && Math.hypot(dx, dy) > 4) drag.moved = true;
+  if (!drag.moved) return;
+  floatPos.value = clampFloat(drag.ox + dx, drag.oy + dy);
+}
+function onFloatUp(e: PointerEvent) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const moved = drag.moved;
+  drag = null;
+  // 拖过就只是放下，没拖过才算点了"返回门户"
+  if (!moved) backHome();
+}
+
+watch(viewEl, (el, old) => {
+  old?.removeEventListener("scroll", readScroll);
+  el?.addEventListener("scroll", readScroll, { passive: true });
+  requestAnimationFrame(readScroll);
+});
+// 换页、改窗口大小都要重新量：新页面滚动位置是 0，浮窗该收回去
+watch(() => route.path, () => requestAnimationFrame(readScroll));
+function onResize() {
+  floatPos.value = clampFloat(floatPos.value.x, floatPos.value.y);
+  readScroll();
+}
+onMounted(() => window.addEventListener("resize", onResize, { passive: true }));
+
 /**
  * 端口开屏（星坠揭幕）。
  *
@@ -61,27 +137,113 @@ function backHome() {
  * 遮 1.8 秒会变成等待。
  */
 const wipeSeq = ref(0);
+/** 开屏进行中：这段时间到的消息先排队，幕布散尽再一起弹 */
+const wiping = ref(false);
+/**
+ * 预备幕：路由刚开始跳转、动画还没起的那一小段，先铺一块不透明幕布。
+ * 少了它，目标端口会用真实页面顶上这一帧——看起来就是"开屏时页面闪了一下"。
+ */
+const wipeArmed = ref(false);
+/**
+ * 幕布此刻是否盖着（三路来源统一到这一个开关）：
+ *   a. HTML 壳里的静态首屏幕（直接打开端口地址时，比 Vue 更早）
+ *   b. 路由跳转时的预备幕
+ *   c. 开屏动画本身
+ * 消息弹窗只在 veilUp 为 false 时才弹——盖着幕弹出去等于没弹。
+ */
+const veilUp = ref(document.documentElement.classList.contains("v11-veil"));
+let armTimer = 0;
+
+/** 撤掉 HTML 里的静态首屏幕（开屏动画已经接管，撤了也看不出来） */
+function dropBootVeil() {
+  document.documentElement.classList.remove("v11-veil");
+}
+
+function armWipe() {
+  wipeArmed.value = true;
+  veilUp.value = true;
+  window.clearTimeout(armTimer);
+  // 兜底：跳转被拦下、token 失效、后端一直不回……6 秒后自己撤幕，
+  // 别把人关在绿屏里（正常进场 0.3 秒内就被真正的开屏接管了）
+  armTimer = window.setTimeout(() => {
+    wipeArmed.value = false;
+    dropBootVeil();
+    if (!wiping.value) {
+      veilUp.value = false;
+      flushNotices();
+    }
+  }, 6000);
+}
+
+/** 撤预备幕：只在"确实不该盖"的时候调，开屏起播前不要调（会闪一帧） */
+function disarmWipe() {
+  window.clearTimeout(armTimer);
+  wipeArmed.value = false;
+  if (!wiping.value) {
+    dropBootVeil();
+    veilUp.value = false;
+  }
+}
+
+// 跳转一开始就盖幕。刷新页面时 profile 还没换回来，所以看 token：
+// 有 token 就按"已登录"处理，不能等身份到手才盖——那时页面已经画出来了
+router.beforeEach((to, from) => {
+  if (!to.meta.home) return;
+  if (to.path === from.path) return;
+  if (!auth.profile && !auth.token) return;
+  armWipe();
+});
+router.afterEach((_to, _from, failure) => {
+  if (failure) disarmWipe();
+});
+
+// 首屏（刷新页面 / 直接打开端口地址）：全局守卫是在 App 挂载时才注册的，
+// 这时初始导航早就跑完了，守卫根本没见过第一次跳转。所以这里按当前路由补一次——
+// 只要落在端口、本地还有 token，就把幕布立在第一帧之前（HTML 那块幕更早，这里接上状态）
+if (route.meta.home && (auth.token || auth.profile)) armWipe();
+
 let lastWipePath = "";
 watch(
   () => [route.path, !!auth.profile] as const,
   ([path, hasProfile]) => {
+    // 初始导航还没落定时 route.name 是空的：这时候既不知道进的是哪个端，
+    // 也不该撤幕（以前就是在这里把首屏静态幕提前撤了，页面于是先露一帧）
+    if (!route.name) return;
     if (route.name === "login") {
       lastWipePath = "";
+      disarmWipe();
       return;
     }
     if (!hasProfile) return;
     if (!route.meta.home) {
       // 进了端内部：清掉记录，下次回到端口入口重新播
       lastWipePath = "";
+      disarmWipe();
       return;
     }
     // 同一路径的 query 变化（如 blocked 提示）不算重新进端
     if (path === lastWipePath) return;
     lastWipePath = path;
+    // 只撤预备幕，别动 veilUp：真正的开屏马上就上，中间不能有缝
+    window.clearTimeout(armTimer);
+    wipeArmed.value = false;
     wipeSeq.value++;
   },
   { immediate: true },
 );
+
+function onWipeStart() {
+  wiping.value = true;
+  veilUp.value = true;
+  // 等这一帧画完再撤静态幕：此时开屏的两块绿幕已经上屏，撤掉看不出接缝
+  requestAnimationFrame(() => dropBootVeil());
+}
+function onWipeDone() {
+  wiping.value = false;
+  dropBootVeil();
+  veilUp.value = false;
+  flushNotices();
+}
 
 
 // 切端 / 换账号时都重置对话面板：角色和账号任一变化都要换会话，
@@ -101,6 +263,54 @@ watch(isLogin, (login) => {
 });
 
 // ---- 消息中心：登录后开始轮询，退出即停；新通知到 → 右下角弹窗 ----
+/**
+ * 开屏期间到的消息先排在这里。
+ * 幕布盖满整屏时弹窗只会被压在下面，人根本看不见；等幕布散尽再一起弹，
+ * 才真正做到"进端口就告诉你有什么新消息"。
+ */
+const queuedNotices: NoticeItem[] = [];
+
+function showNotice(n: NoticeItem) {
+  ElNotification({
+    title: n.title,
+    message: n.text,
+    type: n.kind === "appeal_new" || n.kind === "absent" ? "warning" : "info",
+    // 永久停留，直到使用者主动叉掉——重要消息不会被一闪而过错过
+    duration: 0,
+    showClose: true,
+  });
+}
+
+function flushNotices() {
+  if (!queuedNotices.length) return;
+  if (window.innerWidth <= 760) {
+    queuedNotices.length = 0;
+    return;
+  }
+  const batch = queuedNotices.splice(0, queuedNotices.length);
+  // 每条错开 120ms：三条同时蹦出来像报错，一条条落下来才看得清
+  batch.forEach((n, i) => window.setTimeout(() => showNotice(n), i * 120));
+}
+
+/**
+ * 进端口的「报到」：先拉一次最新的，再把当前未读的头部几条弹出来。
+ *
+ * 关键点是 popUnread 不看「弹过没弹过」——只要还没读，每次进门都再报一遍。
+ * 以前靠 refresh 的增量回调来弹，而那张已弹名单是整场会话共用的，
+ * 所以第二次进端口就一条也弹不出来了。
+ */
+async function popPortNotices() {
+  if (isLogin.value || !auth.profile) return;
+  if (window.innerWidth <= 760) return;   // 手机端不弹，靠铃铛红点
+  await notices.refresh(true);            // 进门前先刷新，弹的是最新数据
+  const list = notices.popUnread(3);
+  for (const n of list) {
+    // 幕布还盖着（首屏静态幕 / 预备幕 / 开屏动画）：先进队列，散尽再弹
+    if (veilUp.value) queuedNotices.push(n);
+    else showNotice(n);
+  }
+}
+
 let stopArrive: (() => void) | null = null;
 watch(
   () => auth.profile?.account,
@@ -113,14 +323,9 @@ watch(
         // 消息本来就靠右上角铃铛上的红点提示，不必再抢一次注意力。
         if (window.innerWidth <= 760) return;
         for (const n of items.slice(0, 3)) {
-          ElNotification({
-            title: n.title,
-            message: n.text,
-            type: n.kind === "appeal_new" || n.kind === "absent" ? "warning" : "info",
-            // 永久停留，直到使用者主动叉掉——重要消息不会被一闪而过错过
-            duration: 0,
-            showClose: true,
-          });
+          // 幕布盖着（首屏静态幕 / 预备幕 / 开屏动画）：先攒着，散尽再弹
+          if (veilUp.value) queuedNotices.push(n);
+          else showNotice(n);
         }
       });
     } else {
@@ -146,10 +351,47 @@ watch(
 /**
  * 每次进入新的页面/端口都主动拉一次消息与待办。
  * 轮询是 25 秒一轮，切页时刚好错开就会看到旧数据（例如别处刚发来的家校消息
- * 在侧栏没有红点）。这里按「路径 + 锚点 + 对话/看板模式」变化补一次静默刷新。
+ * 在侧栏没有红点）。
+ *
+ * 这里保持静默：弹窗只在两条路上出现——「进端口报到」（popPortNotices）
+ * 和轮询发现的新消息（onArrive）。三处都弹的话同一批消息会出现两三遍。
  */
 watch(
-  () => `${route.path}|${route.hash}|${chat.aiOpen}`,
+  () => route.path,
+  () => {
+    if (!isLogin.value && auth.profile) void notices.refresh(true);
+  },
+);
+
+/**
+ * 进端口 → 报到弹窗。
+ *
+ * 触发条件：落在端口入口（meta.home），身份已在，且不是同一个「路径 + 账号」
+ * 的重复变化（query 之类不算重新进门）。
+ * 从端内部退回门户、在门户之间切换、登录后落到自己的端，都算一次进门。
+ */
+let lastPopKey = "";
+watch(
+  () => `${route.path}|${route.meta.home ? 1 : 0}|${auth.profile?.account ?? ""}`,
+  () => {
+    // 离开端口（进功能页、回登录页、或身份还没到）：把记号清掉。
+    // 不清的话，"进功能页再返回门户"会被当成同一次进门，直接跳过——
+    // 这正是以前返回门户不弹消息的原因。
+    if (!route.name || route.name === "login" || !route.meta.home || !auth.profile || isLogin.value) {
+      lastPopKey = "";
+      return;
+    }
+    const key = `${route.path}|${auth.profile.account}`;
+    if (key === lastPopKey) return;
+    lastPopKey = key;
+    void popPortNotices();
+  },
+  { immediate: true },
+);
+
+/** 页内锚点与 AI 抽屉开合不换页，只补一次静默刷新，不打扰人 */
+watch(
+  () => `${route.hash}|${chat.aiOpen}`,
   () => {
     if (!isLogin.value && auth.profile) void notices.refresh(true);
   },
@@ -211,6 +453,8 @@ watch(
 
 onUnmounted(() => {
   if (llmTimer) clearInterval(llmTimer);
+  window.removeEventListener("resize", onResize);
+  viewEl.value?.removeEventListener("scroll", readScroll);
 });
 </script>
 
@@ -239,7 +483,7 @@ onUnmounted(() => {
     <main class="main" :class="{ 'main-home': isHome }">
       <TopBar @change-password="pwdOpen = true" />
 
-      <section class="view" :class="{ 'view-home': isHome }">
+      <section ref="viewEl" class="view" :class="{ 'view-home': isHome }">
         <!-- 大模型掉线：显式说明一句，否则回答变生硬会被当成系统坏了 -->
         <div v-if="llmOff" class="llm-banner">
           <span class="llm-dot" aria-hidden="true"></span>
@@ -263,7 +507,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 内页：门户在上一层，给一条明确的回程路，并把 AI 抽屉的入口一起带过来 -->
-        <div v-if="pageTitle" class="back-bar">
+        <div v-if="pageTitle" ref="backBarEl" class="back-bar">
           <button class="back-btn" data-test="back-home" @click="backHome">
             <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
               <path
@@ -282,6 +526,34 @@ onUnmounted(() => {
           <button class="back-ai" data-test="back-ai" @click="chat.openAi()">问 AI</button>
         </div>
 
+        <!-- 原按钮被滚出视口后，顶上这只浮窗：同样大小、同样长相，可以拖到任意位置。
+             拖过就只是放下，没拖过（4px 内）才算点了回门户。 -->
+        <Teleport to="body">
+          <button
+            v-if="pageTitle && backHidden"
+            class="back-float"
+            :style="{ left: `${floatPos.x}px`, top: `${floatPos.y}px` }"
+            data-test="back-home-float"
+            title="按住可以拖到任意位置，点一下回门户"
+            @pointerdown="onFloatDown"
+            @pointermove="onFloatMove"
+            @pointerup="onFloatUp"
+            @pointercancel="onFloatUp"
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <path
+                d="M14.5 6 8.5 12l6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            返回门户
+          </button>
+        </Teleport>
+
         <div v-if="app.error" class="card">
           <b>初始化失败</b>
           <p class="tiny muted">{{ app.error }}</p>
@@ -298,7 +570,7 @@ onUnmounted(() => {
   </div>
 
   <!-- 端口开屏：挂在应用层、Teleport 到 body，盖住导航栏与抽屉，开场统一由它接管 -->
-  <StarWipe :seq="wipeSeq" />
+  <StarWipe :seq="wipeSeq" :armed="wipeArmed" @start="onWipeStart" @done="onWipeDone" />
   </el-config-provider>
 </template>
 
@@ -360,6 +632,52 @@ onUnmounted(() => {
   background: var(--moss);
   border-color: var(--moss);
   color: #f6f2e8;
+}
+/* 滚出视口后的浮窗：高度/内边距/字号/圆角与原按钮逐项对齐，
+   只多了固定定位、投影和抓手光标——否则会像换了一个按钮 */
+.back-float {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--moss);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(35, 38, 31, 0.14);
+  cursor: grab;
+  /* 触屏上按住拖动时不要顺带把页面滚起来 */
+  touch-action: none;
+  user-select: none;
+  animation: back-float-in 160ms ease-out both;
+}
+.back-float:hover {
+  background: var(--moss);
+  border-color: var(--moss);
+  color: #f6f2e8;
+}
+.back-float:active {
+  cursor: grabbing;
+}
+@keyframes back-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .back-float {
+    animation: none;
+  }
 }
 .back-sep {
   width: 18px;
