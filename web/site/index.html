@@ -21,8 +21,7 @@
       body {
         margin: 0;
         background: #faf5ee;
-      }
-      .boot {
+      }      .boot {
         position: fixed;
         inset: 0;
         display: flex;
@@ -89,15 +88,35 @@
           width: 100%;
         }
       }
+      /* 首屏开屏幕：直接打开某个端时，Vue 挂载到开屏动画起播之间有几百毫秒，
+         以前这段时间端口原样露在屏幕上（就是"闪一下"）。这块幕在 HTML 里、
+         和样式同一批解析，第一帧就盖住；开屏动画接手时立刻撤掉。 */
+      #boot-veil {
+        display: none;
+      }
+      html.v11-veil #boot-veil {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 10001;
+        background:
+          radial-gradient(72% 58% at 74% 16%, #1d6a5b 0%, rgba(29, 106, 91, 0) 62%),
+          linear-gradient(158deg, #1a6154 0%, #16564a 46%, #0e3d35 100%);
+      }
     </style>
-    <script type="module" crossorigin src="./assets/index-BuP5SUN4.js"></script>
+    <!-- 以前：直接打开某个端、本地又有登录态 → 第一帧就挂绿幕，防止端口页面先露一下。
+         现在每次打开都先落在登录页（见 router 里的 bootNav），首帧不再是端口页面，
+         这块幕布反而会在跳转前闪一下绿色，所以撤掉。#boot-veil 的样式留着：
+         应用内跳转时的预备幕仍由 App.vue 接管（它用的是同一块 DOM）。 -->
+    <script type="module" crossorigin src="./assets/index-DiTd8nND.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/vue-BPrFmZ2n.js">
     <link rel="modulepreload" crossorigin href="./assets/vendor-Dv46NwSo.js">
-    <link rel="modulepreload" crossorigin href="./assets/element-BAnVgSAm.js">
+    <link rel="modulepreload" crossorigin href="./assets/element-C-svEG1v.js">
     <link rel="stylesheet" crossorigin href="./assets/element-D-kf9ZMK.css">
-    <link rel="stylesheet" crossorigin href="./assets/index-udYIDoa8.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-GfMpoq-y.css">
   </head>
   <body>
+    <div id="boot-veil" aria-hidden="true"></div>
     <div id="app">
       <div class="boot" role="status" aria-live="polite">
         <div class="boot-ring" aria-hidden="true"></div>

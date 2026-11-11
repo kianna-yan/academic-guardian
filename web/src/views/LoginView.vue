@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore, HOME_OF } from "@/stores/auth";
-import type { Role } from "@/types";
+import type { AuthProfile, Role } from "@/types";
 import skyBg from "@/assets/login-sky.webp";
 
 const app = useAppStore();
@@ -161,11 +161,18 @@ function starStyle(s: (typeof SKY_STARS)[number]) {
   };
 }
 
-onMounted(() => {
+onMounted(async () => {
   // 从被拦截的地址过来时，提示一下而不是默默跳走
   const blocked = route.query.blocked;
   if (typeof blocked === "string" && blocked) {
     error.value = "当前账号没有该端的权限，请用对应账号登录";
+  }
+
+  // 每次打开链接都落在这一页，但身上可能还带着上次的登录态：
+  // 拿它换出身份，给一个「继续进入」的入口——一屏一按就回去，不用重新输密码。
+  if (auth.token) {
+    const p = await auth.hydrate();
+    if (p) lastProfile.value = p;
   }
 });
 
@@ -214,6 +221,33 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
     form.password = "2222";
   }
   error.value = "";
+}
+
+/** 上次的登录身份（仅在登录态还有效时出现） */
+const lastProfile = ref<AuthProfile | null>(null);
+const ROLE_CN: Record<Role, string> = {
+  student: "学生端",
+  counselor: "辅导员端",
+  admin: "教务端",
+  parent: "家长端",
+  teacher: "教师端",
+};
+const lastLabel = computed(() =>
+  lastProfile.value ? `${ROLE_CN[lastProfile.value.role]} · ${lastProfile.value.account}` : "",
+);
+
+/** 一按就回上次那个端，不用重新输密码 */
+async function resume() {
+  const p = lastProfile.value;
+  if (!p) return;
+  await router.push(HOME_OF[p.role]);
+}
+
+/** 换个账号：清掉本地登录态，回到空白登录态 */
+function forgetLast() {
+  auth.logout();
+  lastProfile.value = null;
+  form.password = "";
 }
 </script>
 
@@ -264,6 +298,18 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
 
       <!-- 右：登录表单 -->
       <section class="login-card">
+        <!-- 上次还在登录态：给一条一按就回去的路。每次打开都落在这页，
+             但没必要让已经登录过的人重新输一遍密码 -->
+        <div v-if="lastProfile" class="resume">
+          <span class="rs-av">{{ (lastProfile.name || "?").slice(0, 1) }}</span>
+          <span class="rs-txt">
+            <b>{{ lastProfile.name }}</b>
+            <em>{{ lastLabel }}</em>
+          </span>
+          <button class="rs-go" type="button" @click="resume">继续进入</button>
+          <button class="rs-x" type="button" title="换个账号登录" @click="forgetLast">切换</button>
+        </div>
+
         <div class="tabs" role="tablist">
           <button
             v-for="e in ENTRIES"
@@ -456,6 +502,13 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   gap: 14px;
   flex-wrap: wrap;
 }
+/* 左栏整体下移，但底部必须停在「小女孩头顶上方」那条线上：
+   文案块（品牌行 + 标题 + 说明 + 五端要点）底边固定落在视口 50.5% 处，
+   与人物头顶之间留约 55px（1.5cm）的空当，视线从字收进画里，不压到头发。
+   （45.5vh − 312px 由「底边 50.5vh − 舞台顶内边距 5vh − 文案块高 312px」推得） */
+.login-intro {
+  margin-top: clamp(20px, calc(45.5vh - 312px), 170px);
+}
 .login-intro .brand {
   display: flex;
   align-items: center;
@@ -542,6 +595,82 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   border-radius: 999px;
   padding: 3px 9px;
   white-space: nowrap;
+}
+
+/* 上次登录还在：一条细长的"继续进入"提示，压在端口页签上面 */
+.resume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f8f5ee;
+}
+.rs-av {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.rs-txt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+}
+.rs-txt b {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.rs-txt em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rs-go {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.rs-go:hover {
+  background: var(--moss-deep);
+}
+.rs-x {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.rs-x:hover {
+  border-color: var(--line);
+  color: var(--text);
 }
 
 /* 右侧卡片 */
@@ -818,6 +947,10 @@ function fill(kind: "student" | "counselor" | "admin" | "parent" | "teacher") {
   .login-shell {
     grid-template-columns: 1fr;
     gap: 22px;
+  }
+  /* 小屏是单列长页：没有并排的登录卡，下移只会白白多出一段空白 */
+  .login-intro {
+    margin-top: 0;
   }
   .login-intro h1 {
     font-size: 24px;

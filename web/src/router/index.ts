@@ -266,7 +266,27 @@ const router = createRouter({
   },
 });
 
+/**
+ * 每次打开链接都先落在登录首页（/login 那张"五个入口，各看各的"）。
+ *
+ * 以前：token 存在 localStorage，关掉页面再打开会接着上次那一页进来。
+ * 现在：这一轮页面加载的第一次导航一律改写到 /login——登录页上有
+ * 「继续进入」按钮，已登录的人一下点回去，不会真的重新输密码。
+ *
+ * 只影响"整页加载"这一下。登录之后在应用里点来点去是 SPA 内跳转，
+ * 不会再经过这里，所以不会把人反复弹回登录页。
+ */
+let bootNav = true;
+/** 本次导航就是"落地到登录页"，别因为身上还有 token 把它弹回端口 */
+let landingLogin = false;
+
 router.beforeEach(async (to) => {
+  if (bootNav) {
+    bootNav = false;
+    landingLogin = true;
+    if (to.name !== "login") return withShare("/login");
+  }
+
   // 老书签 /student#grade 这类地址，先改写成对应的独立页面
   const alias = HASH_ALIAS[`${to.path}${to.hash}`];
   if (alias) return withShare(alias);
@@ -274,7 +294,7 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore();
 
   if (to.meta?.public) {
-    if (to.name === "login" && auth.token) {
+    if (to.name === "login" && auth.token && !landingLogin) {
       if (!auth.profile) await auth.hydrate();
       if (auth.profile) return withShare(HOME_OF[auth.profile.role]);
     }
@@ -304,6 +324,8 @@ router.beforeEach(async (to) => {
 });
 
 router.afterEach((to) => {
+  // 落地这一趟走完就撤掉豁免：之后再主动去 /login（比如退出登录）照旧按原规则走
+  landingLogin = false;
   const title = (to.meta?.title as string) || "学业护航";
   document.title = `${title} · 学业护航`;
   // 视图区自身滚动，路由切换后回到顶部。

@@ -3,8 +3,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { ElMessage } from "element-plus/es/components/message/index";
-import { ElNotification } from "element-plus/es/components/notification/index";
 import PasswordDialog from "@/components/PasswordDialog.vue";
+import NoticeStack from "@/components/NoticeStack.vue";
 import StarWipe from "@/components/StarWipe.vue";
 import TopBar from "@/components/TopBar.vue";
 import AiSheet from "@/components/portal/AiSheet.vue";
@@ -270,15 +270,48 @@ watch(isLogin, (login) => {
  */
 const queuedNotices: NoticeItem[] = [];
 
-function showNotice(n: NoticeItem) {
-  ElNotification({
-    title: n.title,
-    message: n.text,
-    type: n.kind === "appeal_new" || n.kind === "absent" ? "warning" : "info",
-    // 永久停留，直到使用者主动叉掉——重要消息不会被一闪而过错过
-    duration: 0,
-    showClose: true,
+/**
+ * 右上角的消息栈。
+ *
+ * 原来用 ElNotification 一条条弹，三条全展开能压掉右侧 570px 高度——进门第一屏
+ * 半屏都是字，看板本身反而被挡住。改成「折叠成一列，鼠标移上去才展开」后，
+ * 三条只占一条半卡片的高度，想知道细节再悬停。
+ * 卡片宽度仍是 330px，展开后的正文仍是 14px/1.6——就是原来那张通知的样子。
+ */
+interface StackNotice {
+  key: string;
+  warn: boolean;
+  n: NoticeItem;
+}
+const noticeStack = ref<StackNotice[]>([]);
+
+function pushNotice(n: NoticeItem) {
+  // 同一条通知（同一个 id）不重复入栈：报到弹窗与轮询回调可能撞在一起
+  if (noticeStack.value.some((r) => r.key === n.id)) return;
+  noticeStack.value.push({
+    key: n.id,
+    // 旷课与新异议用橙色感叹号，其余用灰色 i —— 与原通知的 type 映射一致
+    warn: n.kind === "absent" || n.kind === "appeal_new",
+    n,
   });
+  // 最多留三条：再多就只是噪音，剩下的都在铃铛里
+  if (noticeStack.value.length > 3) {
+    noticeStack.value.splice(0, noticeStack.value.length - 3);
+  }
+}
+
+/** 叉掉只是关掉这次提醒，不标已读——铃铛红点还留着，下次进门仍会报到 */
+function dismissNotice(key: string) {
+  const at = noticeStack.value.findIndex((r) => r.key === key);
+  if (at >= 0) noticeStack.value.splice(at, 1);
+}
+
+/**
+ * 弹一条：折叠态只露标题，鼠标移上去展开全文（展开动作在 NoticeStack 里，
+ * 这里只负责入栈）。不自动消失，要关得自己点叉——重要消息不该一闪而过。
+ */
+function showNotice(n: NoticeItem) {
+  pushNotice(n);
 }
 
 function flushNotices() {
@@ -332,6 +365,8 @@ watch(
       notices.stop();
       stopArrive?.();
       stopArrive = null;
+      // 退出登录：上一个人的提醒不该留给下一个人看
+      noticeStack.value = [];
     }
   },
   { immediate: true },
@@ -565,6 +600,9 @@ onUnmounted(() => {
 
     <!-- AI 抽屉挂在应用层：不管当前在门户还是内页，唤起它都能铺满整个窗口 -->
     <AiSheet v-if="auth.profile" :role="role" :sid="auth.profile?.sid || null" />
+
+    <!-- 进端口报到的消息：右上角一列折叠卡片，悬停展开 -->
+    <NoticeStack :items="noticeStack" @close="dismissNotice" />
 
     <PasswordDialog v-model="pwdOpen" />
   </div>

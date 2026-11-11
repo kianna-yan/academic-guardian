@@ -9,6 +9,7 @@ const LABEL: Record<string, string> = {
   risk_score: "查风险评分",
   interventions: "取干预建议",
   retrieve_policy: "检索校规库",
+  retrieve_student: "检索本人档案",
   search_policy: "检索校规库",
   roster: "查风险名单",
   campus_overview: "统计全校数据",
@@ -57,7 +58,14 @@ const rag = computed(() => {
   return hit?.retrieval || null;
 });
 
+/** 本人档案：这一轮到底翻了他哪些账（学生/家长端每轮都查） */
+const stu = computed(() => {
+  const hit = [...(props.trace || [])].reverse().find((t) => t.profile);
+  return hit?.profile || null;
+});
+
 const open = ref(false);
+const stuOpen = ref(false);
 
 const channelName = computed(() => {
   const c = rag.value?.channel || "";
@@ -80,6 +88,36 @@ const channelName = computed(() => {
       </span>
       <span v-if="pending" class="trace-step running"><i class="dot"></i>正在处理</span>
       <span v-if="elapsed !== undefined && elapsed > 0" class="trace-total">{{ elapsed }} ms</span>
+    </div>
+
+    <!-- 本人档案：回答里那句「对照你的情况」从哪来，全在这张卡里 -->
+    <div v-if="stu" class="stu">
+      <button type="button" class="stu-head" @click="stuOpen = !stuOpen">
+        <span class="stu-tag">本人</span>
+        <span class="stu-who">
+          {{ stu.scope }}档案<em>· {{ stu.who }}</em>
+        </span>
+        <span class="stu-stat">
+          实时检索 {{ stu.items?.length || 0 }} 项
+          <template v-if="stu.ms"> · {{ stu.ms.toFixed(1) }}ms</template>
+        </span>
+        <span class="stu-more">{{ stuOpen ? "收起" : "展开" }}</span>
+      </button>
+      <div v-if="stuOpen" class="stu-body">
+        <div
+          v-for="it in stu.items"
+          :key="it.key"
+          class="stu-row"
+          :class="{ on: it.hit, off: !it.hit }"
+        >
+          <span class="stu-label">{{ it.label }}</span>
+          <span class="stu-value">{{ it.value }}</span>
+          <span class="stu-src">{{ it.source }}</span>
+        </div>
+        <div class="stu-foot">
+          每轮回答前重新查一次（截至 {{ stu.as_of }}），不用上一轮的旧数；变灰的字段这一问没用到。
+        </div>
+      </div>
     </div>
 
     <!-- 检索过程：评委问「这条规定哪来的」，答案就在这儿 -->
@@ -220,6 +258,100 @@ const channelName = computed(() => {
   flex: 0 0 auto;
   color: #7c8175;
 }
+/* ---- 本人档案 ---- */
+.stu {
+  border: 1px solid #d9e7dd;
+  border-radius: 8px;
+  background: #f6faf6;
+  overflow: hidden;
+}
+.stu-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: #5f7a66;
+  flex-wrap: wrap;
+}
+.stu-head:hover {
+  background: #edf4ee;
+}
+.stu-tag {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #fff;
+  background: #4a7c59;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.stu-who {
+  color: #3f5a46;
+  font-weight: 600;
+}
+.stu-who em {
+  font-style: normal;
+  font-weight: 400;
+  color: #6f8a76;
+}
+.stu-stat {
+  flex: 0 0 auto;
+  color: #7e9583;
+  font-variant-numeric: tabular-nums;
+}
+.stu-more {
+  margin-left: auto;
+  color: #3f6b4c;
+  flex: 0 0 auto;
+}
+.stu-body {
+  border-top: 1px dashed #d9e7dd;
+  padding: 6px 9px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.stu-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10.5px;
+  color: #44604c;
+}
+.stu-row.off {
+  opacity: 0.45;
+}
+.stu-label {
+  flex: 0 0 52px;
+  color: #6f8a76;
+}
+.stu-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #2f4a37;
+  font-variant-numeric: tabular-nums;
+}
+.stu-src {
+  flex: 0 0 196px;
+  text-align: right;
+  font-size: 9.5px;
+  color: #8fa697;
+}
+.stu-foot {
+  font-size: 10px;
+  color: #8fa697;
+  padding-top: 3px;
+}
+
 .rag-terms,
 .rag-empty {
   font-size: 10px;

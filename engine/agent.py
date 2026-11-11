@@ -197,6 +197,104 @@ class Agent:
             "credits": s["credits"], "risk": r,
         }
 
+    # ---------- 学生本人档案：每轮回答前先把这笔账重新翻一遍 ----------
+    # 风险分、考勤、作业都是会变的；上一轮说过的话不能当这一轮的事实用。
+    # 用户问的往往还不是自己（「挂一科还能考研吗」问的是制度），但回答里要说
+    # 「对照你的情况」，就必须先知道他现在到底什么处境，否则只能讲空话。
+    _FACT_KW = {
+        "risk": ["风险", "预警", "扣分", "等级", "多少分"],
+        "study": ["挂", "补考", "重修", "考研", "保研", "绩点", "gpa", "成绩", "均分",
+                  "毕业", "降级", "退学", "学位", "推免"],
+        "attend": ["考勤", "旷课", "缺课", "迟到", "出勤", "点名", "请假"],
+        "homework": ["作业", "未交", "迟交", "提交", "实验报告"],
+        "credit": ["学分", "培养方案", "选课"],
+        "course": ["课表", "几门课", "哪门课", "在修", "上课", "老师"],
+    }
+
+    def student_facts(self, sid: str, role: str = "student", message: str = "",
+                      intent: str = "") -> dict:
+        """实时查一遍学生本人的档案，返回可直接下发的结构化结果。
+
+        字段与来源逐条标明，是为了让「它凭什么这么说」可核查：
+        风险分来自六因素加权，出勤来自逐节打卡，作业来自作业平台。
+        """
+        t0 = time.time()
+        s = self.engine.get(sid)
+        r = self.engine.score(sid)
+        h = s.get("history") or {}
+        cr = s.get("credits") or {}
+        courses = s.get("courses") or []
+
+        absent = sum(int(c.get("absent") or 0) for c in courses)
+        late = sum(int(c.get("late") or 0) for c in courses)
+        held = sum(int(c.get("sessions_held") or 0) for c in courses)
+        hw_all = sum(int(c.get("hw_assigned") or 0) for c in courses)
+        hw_done = sum(int(c.get("hw_submitted") or 0) for c in courses)
+        attend_rate = round((held - absent) / held * 100, 1) if held else 100.0
+        hw_rate = round(hw_done / hw_all * 100, 1) if hw_all else 100.0
+        factors = (r.get("factors") or [])[:2]
+        worst = min(courses, key=lambda c: c.get("midterm") or 0) if courses else None
+        trend = r.get("trend") or {}
+        scope = {"student": "本人", "parent": "孩子"}.get(role, "该生")
+
+        items = [
+            {"key": "who", "label": "身份",
+             "value": f"{s['name']} · {s['class_name']} · {s['major']}{s['grade']}",
+             "source": "accounts · 学籍档案"},
+            {"key": "risk", "label": "风险分",
+             "value": f"{r.get('score')} 分 · {r.get('level_label')}"
+                      + (f"（{trend.get('label')}）" if trend.get("label") else ""),
+             "source": "risk_score() · 六因素加权"},
+            {"key": "factor", "label": "主要扣分",
+             "value": "、".join(f"{f.get('label')} {f.get('points')}" for f in factors) or "—",
+             "source": "risk_score() · 因素拆解"},
+            {"key": "study", "label": "学业",
+             "value": f"GPA {h.get('gpa', '—')} · 均分 {h.get('avg', '—')} · "
+                      f"累计挂科 {h.get('failed_credits', '—')} 学分",
+             "source": "scores · 历史成绩"},
+            {"key": "credit", "label": "学分",
+             "value": f"已修 {cr.get('earned', '—')}/{cr.get('plan_total', '—')} · "
+                      f"本学期在修 {cr.get('in_progress', '—')}",
+             "source": "curriculum · 培养方案"},
+            {"key": "attend", "label": "考勤",
+             "value": f"出勤率 {attend_rate}% · 旷课 {absent} 次 · 迟到 {late} 次",
+             "source": "checkins · 逐节打卡"},
+            {"key": "homework", "label": "作业",
+             "value": f"提交率 {hw_rate}%（{hw_done}/{hw_all}）",
+             "source": "homework · 作业平台"},
+            {"key": "course", "label": "在修课程",
+             "value": f"{len(courses)} 门" + (
+                 f"，最低 {worst.get('name')} {worst.get('midterm')} 分" if worst else ""),
+             "source": "courses · 本学期课表"},
+        ]
+
+        text = (message or "").lower()
+        hit = {k: any(w in text for w in ws) for k, ws in self._FACT_KW.items()}
+        # 问制度 / 问原因 / 问怎么办时，答案一定要「对照他自己」，
+        # 所以风险分与扣分项算这一问真的用到了，不该在界面上灰掉。
+        if intent in ("policy", "why", "advice", "trend"):
+            for k in ("risk", "factor", "study"):
+                hit[k] = True
+        for it in items:
+            it["hit"] = bool(hit.get(it["key"]))
+        if not any(hit.values()):          # 没点名字段就按「体检」给：风险 + 学业
+            for it in items:
+                it["hit"] = it["key"] in ("risk", "study")
+
+        return {
+            "who": s["name"],
+            "sid": sid,
+            "scope": scope,
+            "query": (message or "")[:40],
+            "fields": [it["label"] for it in items if it["hit"]],
+            "items": items,
+            "brief": (f"风险 {r.get('score')} 分（{r.get('level_label')}）、"
+                      f"累计挂科 {h.get('failed_credits', '—')} 学分、"
+                      f"出勤 {attend_rate}%、作业 {hw_rate}%"),
+            "as_of": time.strftime("%m-%d %H:%M"),
+            "ms": round((time.time() - t0) * 1000, 2),
+        }
+
     def t_actions(self, sid: str) -> list[dict]:
         return self.engine.interventions(sid)
 
@@ -1075,6 +1173,44 @@ class Agent:
                 intent = "material"
                 think(f"老师上传的资料里有相关内容（{mat_hits[0].get('score_pct', '')}），按原文答。")
 
+        # ---- 学生本人档案：每轮都实时翻一遍，再决定怎么答 ----
+        # 放在校规检索与模型路由之前：先知道「他是谁、现在什么处境」，
+        # 制度条款才能落到人身上，回答里那句「对照你的情况」也才有来路。
+        # 档案是会变的（打卡、交作业、成绩录入），所以每轮重查，不吃上一轮的旧数。
+        facts: dict | None = None
+
+        def fetch_facts(who_sid: str) -> str:
+            """实时查一次学生本人档案：写进轨迹，并返回给模型看的事实段落。"""
+            nonlocal facts
+            try:
+                f = self.student_facts(who_sid, role, raw_message or message, intent)
+            except Exception:  # noqa: BLE001 - 查不到档案不能挡住回答
+                return ""
+            facts = f
+            think(f"先把{f['scope']}的账翻一遍：{f['brief']}。")
+            item = {
+                "tool": "retrieve_student",
+                "label": f"检索{f['scope']}档案",
+                "args": {"sid": f["sid"], "fields": len(f["fields"])},
+                "ms": f["ms"],
+                "evidence": {"source": "students / checkins / homework 表",
+                             "table": f"{f['scope']}档案（实时查询）",
+                             "rows": len(f["items"]), "unit": "项",
+                             "ts": f["as_of"], "ms": f["ms"],
+                             "detail": "每轮回答前重新查一次，不用上一轮的旧数"},
+                "profile": f,
+            }
+            trace.append(item)
+            if emit:
+                emit("tool", item)
+            return (f"{f['scope']}档案（本轮实时检索结果，以此为准，不要再问用户要这些信息）：\n"
+                    + "\n".join(f"- {it['label']}：{it['value']}" for it in f["items"]))
+
+        facts_ctx = ""
+        # 学生/家长端：问什么都是先看本人，所以每轮无条件查，不做关键词过滤
+        if sid and role in ("student", "parent"):
+            facts_ctx = fetch_facts(sid)
+
         # ---- 规则引擎认不出的问题，交给模型自己判断该查什么 ----
         # 这是「问几个不同问题却回同一句话」的根因修复：原来所有 unknown
         # 都落到下面同一个 else 分支，输出的是硬编码的那段能力清单。
@@ -1084,6 +1220,11 @@ class Agent:
             from . import router as router_mod
             routed = router_mod.route(self, role, sid, message, school, profile, emit)
             if routed:
+                # 本人档案这条轨迹要跟着走：路由结果自带一份 trace，
+                # 直接返回会把它冲掉，界面上就只剩「模型选工具」了。
+                if trace:
+                    routed["trace"] = trace + list(routed.get("trace") or [])
+                    routed["thoughts"] = thoughts + list(routed.get("thoughts") or [])
                 return routed
 
         # ---- 多轮：取上一轮记忆，消解这轮在说谁 ----
@@ -1133,6 +1274,13 @@ class Agent:
                     "（说明：库里没有叫「大三软件工程班」的班级——现有班级是 "
                     f"{'、'.join(self._classes)}。下面是你能看到的范围：你自己任教的课。）")
 
+
+        # 辅导员/教务/教师问到具体某个学生：同样先翻他的档案
+        # （名单、全校统计这类问的是一群人，不查；查了也只是噪音）
+        if (not facts_ctx and target_sid and role in ("counselor", "admin", "teacher")
+                and intent in ("policy", "why", "advice", "unknown", "score", "trend",
+                               "attendance", "homework")):
+            facts_ctx = fetch_facts(target_sid)
 
         def call(name, fn, **kwargs):
             start = time.time()
@@ -1816,10 +1964,13 @@ class Agent:
             from . import router as router_mod
             routed = router_mod.route(self, role, sid, message, school, profile, emit)
             if routed:
+                if trace:
+                    routed["trace"] = trace + list(routed.get("trace") or [])
+                    routed["thoughts"] = thoughts + list(routed.get("thoughts") or [])
                 return routed
 
         if llm.available():
-            context = "\n".join(blocks)
+            context = "\n".join(blocks + ([facts_ctx] if facts_ctx else []))
             cit = "\n".join(
                 f"[{i}] {c['citation']}"
                 f"（{c.get('school', '')}{'·' if c.get('school') else ''}相关度 {c.get('score_pct', '')}）："

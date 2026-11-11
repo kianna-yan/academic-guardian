@@ -436,6 +436,20 @@ export interface ChatTrace {
     ms?: number;
     hits?: { rank: number; path: string; school?: string; score?: string; why?: string }[];
   };
+  /** 学生本人档案的检索结果：每轮回答前实时重查，字段与来源逐条列出 */
+  profile?: {
+    who: string;
+    sid: string;
+    /** 本人 / 孩子 / 该生 */
+    scope: string;
+    query?: string;
+    /** 这一问实际点到的字段名 */
+    fields?: string[];
+    items?: { key: string; label: string; value: string; source: string; hit?: boolean }[];
+    brief?: string;
+    as_of?: string;
+    ms?: number;
+  };
   evidence?: {
     source?: string;
     table?: string;
