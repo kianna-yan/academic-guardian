@@ -96,6 +96,11 @@ export const useChatStore = defineStore("chat", () => {
    * 收起后原样退回。对话本身不随抽屉开关丢失（消息在 store 里）。
    */
   const aiOpen = ref(false);
+  /**
+   * 端口首屏当前是「图形门户」还是「对话」。
+   * SideBar 靠它决定高亮哪一项、点首页时是收起对话还是切回门户。
+   */
+  const homeMode = ref<"dash" | "chat">("dash");
   const messages = ref<ChatMessage[]>([]);
   const suggestions = ref<string[]>([]);
   /**
@@ -306,6 +311,7 @@ export const useChatStore = defineStore("chat", () => {
 
   return {
     aiOpen,
+    homeMode,
     messages,
     suggestions,
     suggRole,
