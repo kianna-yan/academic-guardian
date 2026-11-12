@@ -169,13 +169,15 @@ onMounted(load);
           <div class="res-main">
             <b>{{ it.filename }}</b>
             <span class="tiny muted">
-              {{ fmtSize(it.size) }}
+              <template v-if="it.url">在线课程</template>
+              <template v-else>{{ fmtSize(it.size) }}</template>
               <template v-if="it.course"> · {{ it.course }}</template>
               <template v-if="it.class_name"> · {{ it.class_name }}</template>
               <template v-if="isTeacher"> · 上传于 {{ it.created_at }}</template>
               <template v-else> · {{ it.teacher }}老师 · {{ it.created_at }}</template>
             </span>
             <span v-if="it.note" class="tiny res-note">{{ it.note }}</span>
+            <span v-if="it.url" class="ext-tag">外部课程 · 新窗口打开</span>
             <span v-if="isTeacher && it.kb?.ok" class="kb-tag">
               已入 AI 知识库 · {{ it.kb.sections || 0 }} 段
             </span>
@@ -188,7 +190,9 @@ onMounted(load);
             </span>
           </div>
           <div class="res-side">
-            <button class="btn sm" @click="downloadTeacherResource(it.id)">下载</button>
+            <button class="btn sm" :class="{ link: it.url }" @click="downloadTeacherResource(it.id)">
+              {{ it.url ? "去观看" : "下载" }}
+            </button>
             <button v-if="isTeacher" class="btn sm danger" @click="remove(it)">删除</button>
           </div>
         </li>
@@ -362,6 +366,27 @@ onMounted(load);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 外链网课：浅蓝标记，和本地文件区分开 */
+.ext-tag {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #185fa5;
+  background: #e6f1fb;
+  border: 1px solid #a8cdf0;
+}
+.btn.sm.link {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: #fff;
+}
+.btn.sm.link:hover {
+  background: var(--brand);
+  color: #fff;
 }
 .res-side {
   display: flex;

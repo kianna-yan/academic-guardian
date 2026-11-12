@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
@@ -1314,7 +1314,7 @@ def teacher_resources_delete(rid: str, request: Request):
 
 @app.get("/api/teacher/resources/{rid}/download")
 def teacher_resources_download(rid: str, request: Request):
-    """下载资源：教师与学生均可。"""
+    """下载资源：教师与学生均可。外链型网课（只有 url、没有文件）直接跳转到课程页。"""
     profile = request.state.profile
     if profile.get("role") not in ("teacher", "student"):
         raise HTTPException(403, "仅任课教师与学生可下载资源")
@@ -1324,6 +1324,9 @@ def teacher_resources_download(rid: str, request: Request):
         raise HTTPException(404, "资源不存在")
     if not _resource_visible(hit, profile):
         raise HTTPException(403, "无权访问该资源")
+    # 外链型：没有文件本体，302 到课程页，前端「去观看」也走这里，避免地址写死在页面里
+    if hit.get("url"):
+        return RedirectResponse(str(hit["url"]), status_code=302)
     safe = hit["filename"].replace("/", "_").replace("\\", "_")
     target = RESOURCE_DIR / f"{rid}__{safe}"
     if not target.exists():

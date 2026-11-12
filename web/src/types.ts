@@ -657,6 +657,8 @@ export interface TeacherResource {
   note?: string;
   teacher: string;
   created_at: string;
+  /** 外链型网课（如中国大学 MOOC 课程页）：有值时点「去观看」直接跳转，没有文件本体 */
+  url?: string;
   /** 是否已进 AI 知识库（上传时自动解析入库） */
   kb?: {
     ok: boolean;
