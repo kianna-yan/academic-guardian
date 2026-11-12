@@ -285,10 +285,50 @@ interface StackNotice {
 }
 const noticeStack = ref<StackNotice[]>([]);
 
+/**
+ * 本次登录的弹窗纪律：
+ * - 报到只播一次：进门落地报一回，之后在门户与板块之间来回走都不再重播。
+ *   叉掉就是叉掉了，不用每回一次门户又被同一批提醒怼一次脸。
+ * - 被叉掉的通知 id 记下来：轮询（onArrive）若因为服务端未读状态没变而把同一条
+ *   又送进来，直接拦掉，不会"关了又弹"。
+ * - 两者都写进 sessionStorage：同一标签页刷新页面（演示时最容易手滑）也不重播；
+ *   关掉标签页或退出登录即清空，重新登录理应重新报到一次。
+ */
+const SS_REPORT = "ag.notice.reported.";
+const SS_DISMISS = "ag.notice.dismissed";
+
+function ssReadIds(k: string): string[] {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(k) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+function ssReadFlag(k: string): boolean {
+  try {
+    return sessionStorage.getItem(k) === "1";
+  } catch {
+    return false;
+  }
+}
+function ssWrite(k: string, v: string) {
+  try {
+    sessionStorage.setItem(k, v);
+  } catch {
+    /* 隐私模式禁写：退回纯内存，行为不变，只是刷新后会重播 */
+  }
+}
+
+let reportedAccount = "";
+const dismissedKeys = new Set<string>(ssReadIds(SS_DISMISS));
+
 function pushNotice(n: NoticeItem) {
   // 只在端口首屏弹：进了看板的某一板块之后，右上角这列卡片会压住正要看的表和图，
   // 而且那时候人已经在读具体内容，不该再被"进门口播报"打断。铃铛红点照常在。
   if (!route.meta.home) return;
+  // 本次登录已经叉掉过这条：轮询再撞上来也不再复现
+  if (dismissedKeys.has(n.id)) return;
   // 同一条通知（同一个 id）不重复入栈：报到弹窗与轮询回调可能撞在一起
   if (noticeStack.value.some((r) => r.key === n.id)) return;
   noticeStack.value.push({
@@ -303,8 +343,13 @@ function pushNotice(n: NoticeItem) {
   }
 }
 
-/** 叉掉只是关掉这次提醒，不标已读——铃铛红点还留着，下次进门仍会报到 */
+/**
+ * 叉掉：关掉这条提醒，并记进本次登录的"别再来"名单。
+ * 不标已读——铃铛红点照旧，消息本身仍在消息中心里，只是不再弹脸。
+ */
 function dismissNotice(key: string) {
+  dismissedKeys.add(key);
+  ssWrite(SS_DISMISS, JSON.stringify([...dismissedKeys]));
   const at = noticeStack.value.findIndex((r) => r.key === key);
   if (at >= 0) noticeStack.value.splice(at, 1);
 }
@@ -331,13 +376,23 @@ function flushNotices() {
 /**
  * 进端口的「报到」：先拉一次最新的，再把当前未读的头部几条弹出来。
  *
- * 关键点是 popUnread 不看「弹过没弹过」——只要还没读，每次进门都再报一遍。
- * 以前靠 refresh 的增量回调来弹，而那张已弹名单是整场会话共用的，
- * 所以第二次进端口就一条也弹不出来了。
+ * **一个端只在进场时播一次**。以前是"只要还没读，每次进门都再报一遍"，
+ * 结果在门户和板块之间来回走、或者从别的端切回来，同一批提醒会反复怼到脸上；
+ * 叉掉也没用，回一次门户又弹回来。现在按账号记一次：已经报到过就直接返回，
+ * 想看历史消息走右上角铃铛，铃铛红点是另一套逻辑，不受影响。
  */
 async function popPortNotices() {
   if (isLogin.value || !auth.profile) return;
   if (window.innerWidth <= 760) return;   // 手机端不弹，靠铃铛红点
+  const account = auth.profile.account || "";
+  // 本场登录 + 本标签页已经报到过：不再重播（刷新页面也一样）
+  if (reportedAccount === account) return;
+  if (ssReadFlag(`${SS_REPORT}${account}`)) {
+    reportedAccount = account;            // 同步内存记号，省掉后面的重复判断
+    return;
+  }
+  reportedAccount = account;
+  ssWrite(`${SS_REPORT}${account}`, "1");
   await notices.refresh(true);            // 进门前先刷新，弹的是最新数据
   const list = notices.popUnread(3);
   for (const n of list) {
@@ -348,10 +403,17 @@ async function popPortNotices() {
 }
 
 let stopArrive: (() => void) | null = null;
+/**
+ * 是否真的登录过。profile 是异步 hydrate 的——页面刷新时这个 watch 会先以
+ * `undefined` 触发一次，如果那时就当"退出登录"去清 sessionStorage 里的报到记号，
+ * 刷新后消息弹窗又会被重播一遍。只有"登录过之后又掉成空"才算退出。
+ */
+let hadProfile = false;
 watch(
   () => auth.profile?.account,
   (acc) => {
     if (acc && !isLogin.value) {
+      hadProfile = true;
       notices.start();
       stopArrive?.();
       stopArrive = notices.onArrive((items) => {
@@ -368,8 +430,24 @@ watch(
       notices.stop();
       stopArrive?.();
       stopArrive = null;
-      // 退出登录：上一个人的提醒不该留给下一个人看
+      // 退出登录：上一个人的提醒不该留给下一个人看，
+      // "已报到 / 已叉掉"的记号也要清——重新登录应当重新报到一次
       noticeStack.value = [];
+      queuedNotices.length = 0;
+      reportedAccount = "";
+      dismissedKeys.clear();
+      // 只有"登录过再退出"才动 sessionStorage：启动时的空 profile 不清，
+      // 否则刷新就等于重新登录，弹窗会重来一遍
+      if (!hadProfile) return;
+      hadProfile = false;
+      try {
+        // 退出时不知道下一个是谁，把本会话所有报到/叉掉记号一并清掉
+        Object.keys(sessionStorage)
+          .filter((k) => k.startsWith(SS_REPORT) || k === SS_DISMISS)
+          .forEach((k) => sessionStorage.removeItem(k));
+      } catch {
+        /* 隐私模式禁写，忽略 */
+      }
     }
   },
   { immediate: true },
@@ -398,7 +476,7 @@ watch(
   () => route.path,
   () => {
     // 离开端口首屏就把这列卡片收掉：板块页里它只会挡住内容。
-    // 回到首屏时会重新"报到"一次（popPortNotices 不看弹过没弹过），所以不会漏消息。
+    // 回到首屏时不会重新播报（报到是一次性的），但铃铛红点与消息中心照旧。
     if (!route.meta.home) {
       noticeStack.value = [];
       queuedNotices.length = 0;
@@ -410,24 +488,14 @@ watch(
 /**
  * 进端口 → 报到弹窗。
  *
- * 触发条件：落在端口入口（meta.home），身份已在，且不是同一个「路径 + 账号」
- * 的重复变化（query 之类不算重新进门）。
- * 从端内部退回门户、在门户之间切换、登录后落到自己的端，都算一次进门。
+ * 每次路由变化都问一次，但 popPortNotices 内部按账号只放行一次：
+ * 落地进自己的端、从板块退回门户、在端之间切换，都不会把同一批提醒再播一遍。
+ * 想看没看完的消息，走右上角铃铛。
  */
-let lastPopKey = "";
 watch(
   () => `${route.path}|${route.meta.home ? 1 : 0}|${auth.profile?.account ?? ""}`,
   () => {
-    // 离开端口（进功能页、回登录页、或身份还没到）：把记号清掉。
-    // 不清的话，"进功能页再返回门户"会被当成同一次进门，直接跳过——
-    // 这正是以前返回门户不弹消息的原因。
-    if (!route.name || route.name === "login" || !route.meta.home || !auth.profile || isLogin.value) {
-      lastPopKey = "";
-      return;
-    }
-    const key = `${route.path}|${auth.profile.account}`;
-    if (key === lastPopKey) return;
-    lastPopKey = key;
+    if (!route.name || route.name === "login" || !route.meta.home || !auth.profile || isLogin.value) return;
     void popPortNotices();
   },
   { immediate: true },
