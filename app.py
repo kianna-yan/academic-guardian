@@ -2121,6 +2121,15 @@ if (DIST / "assets").exists():
     app.mount("/assets", _HashedAssets(directory=DIST / "assets"), name="assets")
 
 
+@app.get("/version.json")
+def build_version():
+    """构建版本清单：入口 HTML 用它判断自己是否为旧版，必须实时、可缓存性为零。"""
+    target = DIST / "version.json"
+    if target.is_file():
+        return FileResponse(target, headers=_NO_STORE)
+    raise HTTPException(404, "Not Found")
+
+
 @app.get("/{full_path:path}")
 def spa_fallback(full_path: str):
     """Vue Router 用 history 模式，非 API 路径一律交回 index.html。"""

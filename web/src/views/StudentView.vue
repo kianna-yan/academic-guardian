@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { api } from "@/api/client";
 import ActionList from "@/components/ActionList.vue";
@@ -19,6 +19,7 @@ const app = useAppStore();
 const auth = useAuthStore();
 const chat = useChatStore();
 const route = useRoute();
+const router = useRouter();
 
 /**
  * 门户首屏与看板版块共用这一个组件：
@@ -39,14 +40,21 @@ const appeal = reactive({
   course: "",
 });
 
-/** 对某条考勤/作业记录发起异议：预填课程与记录，弹开表单 */
+/** 对某条考勤/作业记录发起异议：带着这条记录跳到「复核与异议」页，并预填表单 */
 function openAppeal(kind: "attendance" | "homework", record: { id?: string; date?: string; period?: string }, course: string) {
   appeal.kind = kind;
   appeal.course = course;
   appeal.record_id = record.id || (record.date && record.period ? `${course}-${record.date}-${record.period}` : course);
   appeal.text = "";
   appeal.open = true;
-  document.querySelector(".appeal-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  // 异议不在记录下面就地填：它有回执、有台账，属于「复核与异议」那一页。
+  // 所以这里直接换到那一页，把「针对哪条记录」一起带过去。
+  if (sec.value !== "appeal") void router.push("/student/appeal");
+  // 等路由切换与新板块渲染完再滚动：路由 afterEach 会把内页滚回顶部，
+  // 早滚会被那次复位盖掉，所以晚一点再滚到表单上。
+  window.setTimeout(() => {
+    document.querySelector(".appeal-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 420);
 }
 
 // 学号来自登录身份，不再读演示数据
@@ -295,7 +303,7 @@ async function submitAppeal() {
 
     <!-- 因素 / 行动 -->
     <template v-if="sec === 'overview'">
-    <RegionBand id="risk" no="03" title="风险归因与行动" tone="risk"
+    <RegionBand id="risk" no="02" title="风险归因与行动" tone="risk"
       desc="为什么是这个等级，以及这周具体做哪几件事" />
 
     <div class="two-col">

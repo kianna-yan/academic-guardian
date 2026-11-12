@@ -1643,9 +1643,40 @@ function intentLabel(v: string): string {
   font-size: 9px;
   color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
-/* 空间不够就先收起来，别压到输入框上 */
+/* 窄一点的窗口（≤1280，含 1080p 屏开 125% 缩放）：
+   原来这里直接 display:none，于是同一份网页，宽屏能看到"接的是哪个模型"，
+   窄屏却一片空白——这正是"不同人看到的界面不一样"的来源之一。
+   现在改成挪到输入框上方的一行：只留模型名，说明文字收起来，信息不丢。 */
 @media (max-width: 1280px) {
   .ch-model {
+    position: static;
+    width: fit-content;
+    max-width: 100%;
+    /* 和输入框同一条左边界：输入框是 860 居中，这里按同样的缩进对上去 */
+    margin: 0 0 8px max(12px, calc((100% - 860px) / 2));
+    padding: 5px 10px;
+    border-radius: 10px;
+    border-left-width: 1px;
+    align-items: center;
+    gap: 7px;
+    background: color-mix(in srgb, var(--moss) 6%, #fffdf9);
+  }
+  .ch-model .mm-live {
+    margin-top: 0;
+  }
+  .ch-model .mm-tx {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .ch-model .mm-tx b {
+    display: none;
+  }
+  .ch-model .mm-tx i {
+    font-size: 10.5px;
+  }
+  .ch-model .mm-tx i.mm-alt {
     display: none;
   }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useAppStore } from "@/stores/app";
@@ -161,6 +161,36 @@ function starStyle(s: (typeof SKY_STARS)[number]) {
   };
 }
 
+/**
+ * 版式等比缩放。
+ *
+ * 这张登录页是按 1440px 宽的设计稿排的（左栏文案 + 小女孩插画 + 右侧登录卡），
+ * 所有尺寸都是 px。之前只给外壳设了 max-width: 1080px，于是同一张页面在不同电脑上
+ * 表现完全不同：1920 宽屏里整块只占一半、看着"很小"，1000 宽的小窗口里卡片几乎顶满、
+ * 草地被裁掉一半——不是"网页不稳定"，是版式没有跟着视口等比缩放。
+ *
+ * 这里把设计稿当成一块 1440 的画布，按 视口宽 / 1440 整体缩放（窗口矮时再用高度兜一下），
+ * 于是任何一台电脑看到的都是同一张构图，只有整体大小不同。
+ * 1000px 以下不缩放：那里走 ≤900 的单列小屏版，再缩就成蚂蚁字了。
+ */
+const fit = ref(1);
+function applyFit() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (vw < 1000) {
+    fit.value = 1;
+    return;
+  }
+  const k = Math.min(vw / 1440, vh / 780);
+  // 上限放到 1.8：2K/4K 屏上也能保持「内容占屏宽 75%」的同一比例，不会被截断成小块
+  fit.value = Math.round(Math.min(1.8, Math.max(0.68, k)) * 1000) / 1000;
+}
+onMounted(() => {
+  applyFit();
+  window.addEventListener("resize", applyFit);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", applyFit));
+
 onMounted(async () => {
   // 从被拦截的地址过来时，提示一下而不是默默跳走
   const blocked = route.query.blocked;
@@ -252,7 +282,7 @@ function forgetLast() {
 </script>
 
 <template>
-  <div class="login-page">
+  <div class="login-page" :style="{ '--fit': String(fit) }">
     <!-- 背景插画与星空跟内容一起铺在这块"舞台"上：滚轮动的时候整张画跟着走，
          而不是钉在视口里让文字从画上滑过去 -->
     <div class="login-stage">
@@ -416,13 +446,18 @@ function forgetLast() {
    插画铺在它上面，所以滚轮一动，画和字是同一张纸，一起走 */
 .login-stage {
   position: relative;
-  min-height: 100%;
+  /* 整块舞台按 --fit 等比缩放；min-height 用 100vh/fit 抵消缩放，
+     缩放后正好等于一屏高，页面不会因为缩放多出一截滚动 */
+  zoom: var(--fit, 1);
+  min-height: calc(100vh / var(--fit, 1));
   display: flex;
   /* 顶部对齐而不是垂直居中：左栏文案整体上移，才能收在小女孩头顶之上；
      居中时内容会被往下压 80px，正好压到她的头发上 */
   align-items: flex-start;
   justify-content: center;
-  padding: clamp(28px, 5vh, 52px) 20px 24px;
+  /* 上下留白按设计稿算：vh 要除以缩放系数，否则整页一缩放，
+     这块留白就跟着变，构图又飘了 */
+  padding: clamp(28px, calc(5vh / var(--fit, 1)), 52px) 20px 24px;
 }
 /* 背景：星空草坪插画（小女孩躺在左下角），左上方压一层极淡的米色给文案留白。
    贴住舞台而不是视口：整页滚动时插画跟着一起卷，画面才是一整张，
@@ -507,7 +542,13 @@ function forgetLast() {
    与人物头顶之间留约 55px（1.5cm）的空当，视线从字收进画里，不压到头发。
    （45.5vh − 312px 由「底边 50.5vh − 舞台顶内边距 5vh − 文案块高 312px」推得） */
 .login-intro {
-  margin-top: clamp(20px, calc(45.5vh - 312px), 170px);
+  margin-top: clamp(20px, calc(45.5vh / var(--fit, 1) - 330px), 170px);
+}
+/* 宽屏时左栏整体左移，使其左留白 = 右侧登录卡片的右留白（都是屏宽 9%） */
+@media (min-width: 1000px) {
+  .login-intro {
+    transform: translateX(-50px);
+  }
 }
 .login-intro .brand {
   display: flex;
@@ -515,15 +556,15 @@ function forgetLast() {
   gap: 12px;
 }
 .brand-mark {
-  width: 40px;
-  height: 40px;
+  width: 43px;
+  height: 43px;
   border-radius: 11px;
   background: var(--brand);
   color: #fff;
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 19px;
 }
 .brand-text {
   display: flex;
@@ -531,25 +572,25 @@ function forgetLast() {
   line-height: 1.2;
 }
 .brand-text strong {
-  font-size: 16px;
+  font-size: 17.5px;
   color: var(--text);
 }
 .brand-text span {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .login-intro h1 {
   margin: 20px 0 10px;
-  font-size: 30px;
+  font-size: 32.5px;
   line-height: 1.25;
   color: var(--text);
 }
 .lead {
   margin: 0;
   color: var(--text-2);
-  font-size: 13.5px;
+  font-size: 14.5px;
   line-height: 1.72;
   max-width: 44em;
 }
@@ -562,8 +603,8 @@ function forgetLast() {
 }
 .points li {
   position: relative;
-  padding-left: 18px;
-  font-size: 13px;
+  padding-left: 19px;
+  font-size: 14px;
   color: var(--text-2);
   line-height: 1.7;
 }
@@ -680,6 +721,13 @@ function forgetLast() {
   border-radius: 16px;
   box-shadow: 0 12px 32px rgba(59, 46, 36, 0.08);
   padding: 22px 24px 20px;
+}
+/* 右栏整体再往右靠一档：卡片右缘落在离屏右缘约 9% 的位置，
+   和左栏之间也不会被拉得很空（左栏位置不动）。窄屏单列时不生效。 */
+@media (min-width: 1000px) {
+  .login-shell > .login-card {
+    transform: translateX(50px);
+  }
 }
 .tabs {
   display: grid;

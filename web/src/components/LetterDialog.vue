@@ -35,7 +35,21 @@ async function copy() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="title || '文书预览'" width="min(720px, 92vw)" align-center>
+  <!--
+    告知函/谈话要点常常是「在学生详情抽屉里点出来的」。
+    抽屉和弹窗都是 Element Plus 的浮层，z-index 由内部计数器分配，抽屉先开就占到
+    了更高的一层，于是文书被抽屉压住一半——正好压掉最该看的那几行字。
+    这里给弹窗自己的遮罩挂一个 class，用样式把它顶到最上层（见文件末尾的全局样式）。
+  -->
+  <el-dialog
+    v-model="visible"
+    :title="title || '文书预览'"
+    width="min(720px, 92vw)"
+    align-center
+    append-to-body
+    modal-class="letter-modal"
+    class="letter-dialog"
+  >
     <p v-if="subject" class="dlg-sub">{{ subject }}</p>
     <MarkdownBody :text="body" />
     <CitationList :citations="citations" />
@@ -51,5 +65,16 @@ async function copy() {
   margin: 0 0 12px;
   font-size: 12px;
   color: var(--muted);
+}
+</style>
+
+<style>
+/*
+ * 文书预览必须压在所有东西上面：学生详情抽屉（在它下面开的）、右上角消息卡片
+ * （2400）、AI 抽屉（2200）。遮罩上的 z-index 是 Element Plus 写成内联样式的，
+ * 只有 !important 能盖过内联值，所以这里必须带上。
+ */
+.el-overlay.letter-modal {
+  z-index: 3200 !important;
 }
 </style>

@@ -286,6 +286,9 @@ interface StackNotice {
 const noticeStack = ref<StackNotice[]>([]);
 
 function pushNotice(n: NoticeItem) {
+  // 只在端口首屏弹：进了看板的某一板块之后，右上角这列卡片会压住正要看的表和图，
+  // 而且那时候人已经在读具体内容，不该再被"进门口播报"打断。铃铛红点照常在。
+  if (!route.meta.home) return;
   // 同一条通知（同一个 id）不重复入栈：报到弹窗与轮询回调可能撞在一起
   if (noticeStack.value.some((r) => r.key === n.id)) return;
   noticeStack.value.push({
@@ -394,6 +397,12 @@ watch(
 watch(
   () => route.path,
   () => {
+    // 离开端口首屏就把这列卡片收掉：板块页里它只会挡住内容。
+    // 回到首屏时会重新"报到"一次（popPortNotices 不看弹过没弹过），所以不会漏消息。
+    if (!route.meta.home) {
+      noticeStack.value = [];
+      queuedNotices.length = 0;
+    }
     if (!isLogin.value && auth.profile) void notices.refresh(true);
   },
 );
@@ -601,8 +610,8 @@ onUnmounted(() => {
     <!-- AI 抽屉挂在应用层：不管当前在门户还是内页，唤起它都能铺满整个窗口 -->
     <AiSheet v-if="auth.profile" :role="role" :sid="auth.profile?.sid || null" />
 
-    <!-- 进端口报到的消息：右上角一列折叠卡片，悬停展开 -->
-    <NoticeStack :items="noticeStack" @close="dismissNotice" />
+    <!-- 进端口报到的消息：右上角一列折叠卡片，悬停展开。只在端口首屏出现 -->
+    <NoticeStack v-if="isHome" :items="noticeStack" @close="dismissNotice" />
 
     <PasswordDialog v-model="pwdOpen" />
   </div>
