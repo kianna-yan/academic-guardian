@@ -3,6 +3,65 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- 入口 HTML 不允许被缓存：它引用了带 hash 的 JS，一旦这份 HTML 停留在旧版本，
+         用户就会一直看到上一版界面（这正是「同一网址不同人不同样」的根因）。
+         下面的 meta 对老浏览器/部分网关有效，现代浏览器由版本自检脚本兜底。 -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <!-- 本次构建的唯一版本号，由 vite.config.ts 在构建时替换 -->
+    <meta name="build-id" content="20261112160024-qypc" />
+    <script>
+      /* 版本自检：与服务器上的 version.json 比对，发现自己是旧 HTML 就带 ?v= 重载一次。
+         正常情况（版本一致）不产生任何请求副作用；离线或接口异常时静默跳过。 */
+      (function () {
+        try {
+          if (location.protocol === "file:") return;
+          var meta = document.querySelector('meta[name="build-id"]');
+          var mine = meta && meta.getAttribute("content");
+          if (!mine || mine.indexOf("__BUILD") === 0) return;
+          function grab(url) {
+            // 分享链接靠 ?sharecode= 通过网关鉴权，探测请求也必须带上，否则拿到的是
+            // 「链接不完整」的 HTML 页面而不是版本清单。
+            var q = "?t=" + Date.now();
+            var sc = location.search.match(/[?&]sharecode=([^&]+)/);
+            if (sc) q += "&sharecode=" + sc[1];
+            return fetch(url + q, { cache: "no-store" })
+              .then(function (r) {
+                var ct = (r.headers.get("content-type") || "").toLowerCase();
+                return r.ok && ct.indexOf("json") >= 0 ? r.json() : null;
+              })
+              .catch(function () {
+                return null;
+              });
+          }
+          // 根路径与当前路径各试一次：站点挂在子目录、或路由处于两层深链接时都能命中
+          grab("./version.json")
+            .then(function (j) {
+              return j ? j : grab("/version.json");
+            })
+            .then(function (j) {
+              if (!j || !j.build || j.build === mine) return;
+              var KEY = "ag-build-reloaded";
+              var done = null;
+              try {
+                done = sessionStorage.getItem(KEY);
+              } catch (e) {}
+              // 已经为这个版本重载过：说明 CDN 把 HTML 钉死了，停止重试，避免死循环
+              if (done === j.build) return;
+              try {
+                sessionStorage.setItem(KEY, j.build);
+              } catch (e) {}
+              // 用 URL 对象改写，保留 sharecode 等既有参数，只追加 v；丢掉 sharecode
+              // 会被网关判成「链接不完整」，队友点进来直接看不到页面。
+              var u = new URL(location.href);
+              u.searchParams.set("v", j.build);
+              location.replace(u.pathname + u.search + u.hash);
+            })
+            .catch(function () {});
+        } catch (e) {}
+      })();
+    </script>
     <title>学业护航 · 学业预警智能体</title>
     <meta
       name="description"
@@ -108,12 +167,12 @@
          现在每次打开都先落在登录页（见 router 里的 bootNav），首帧不再是端口页面，
          这块幕布反而会在跳转前闪一下绿色，所以撤掉。#boot-veil 的样式留着：
          应用内跳转时的预备幕仍由 App.vue 接管（它用的是同一块 DOM）。 -->
-    <script type="module" crossorigin src="./assets/index-Cfl59H7A.js"></script>
+    <script type="module" crossorigin src="./assets/index-lmxmaEUY.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/vue-BPrFmZ2n.js">
     <link rel="modulepreload" crossorigin href="./assets/vendor-Dv46NwSo.js">
     <link rel="modulepreload" crossorigin href="./assets/element-C-svEG1v.js">
     <link rel="stylesheet" crossorigin href="./assets/element-D-kf9ZMK.css">
-    <link rel="stylesheet" crossorigin href="./assets/index-GfMpoq-y.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-BtpLo26z.css">
   </head>
   <body>
     <div id="boot-veil" aria-hidden="true"></div>
