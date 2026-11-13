@@ -110,7 +110,15 @@ const AI_COPY: Record<Role, { title: string; sub: string; hint: string }> = {
   },
 };
 const ai = computed(() => AI_COPY[props.role] ?? AI_COPY.student);
-const modelLabel = computed(() => summary.value?.model || "GLM-5.3");
+/**
+ * 页脚那行小字：这个端口接的是哪只模型。
+ * 作答模型 glm-5.3-flash 直接读后端 /meta，不写死——以前兜底是 "GLM-5.3"，
+ * 后端没配 .env 时会露出模板默认的 gpt-4o-mini，和实际调用对不上。
+ */
+const modelLabel = computed(() => summary.value?.model || "glm-5.3-flash");
+const modelRoute = computed(() => summary.value?.model_route || "glm-4.5-air");
+/** 没配 key 时写明走规则兜底：徽标不能写「在线」而顶上黄条说「未接入」 */
+const modelOnline = computed(() => summary.value?.model_online !== false);
 
 /** 快捷问题直接用会话里那一组（后端给了就用后端的，没给就用各端默认） */
 const chips = computed(() => (chat.suggestions ?? []).slice(0, 4));
@@ -379,7 +387,7 @@ function askChip(q: string) {
         <i class="ai-dot" aria-hidden="true"></i>
         <b>学业守夜 AI</b>
         <span>能看你的全部学情数据，但只说给你听</span>
-        <em>{{ modelLabel }} · 在线</em>
+        <em :title="`作答 ${modelLabel} · 意图路由 ${modelRoute}${modelOnline ? '' : '（未配 key，当前规则兜底）'}`">作答 {{ modelLabel }} · 意图路由 {{ modelRoute }}</em>
       </p>
 
       <div class="ai-card">
@@ -1010,9 +1018,10 @@ function askChip(q: string) {
   flex: none;
   font-style: normal;
   font-size: 8.5px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   color: #b6b8ac;
-  text-transform: uppercase;
+  /* 模型 id 是「glm-5.3-flash」这种小写写法，不再转大写：
+     转大写会显示成 GLM-5.3-FLASH，和接口里返回的名字对不上 */
 }
 
 .ai-card {

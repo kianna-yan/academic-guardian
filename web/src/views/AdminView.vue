@@ -256,7 +256,7 @@ async function exportCSV() {
          日报在右上角工具栏有独立按钮，四个总数在下方环形图里也能读到，留着只是重复占屏。
          侧栏「全校概览」仍落到这个锚点上，直接看分布、因素与班级对比。 -->
     <div id="board" class="board-top">
-      <div class="two-col">
+      <div class="two-col board-cols">
         <div class="card">
           <div class="card-head">
             <h3>风险等级分布</h3>
@@ -273,7 +273,7 @@ async function exportCSV() {
             <h3>最普遍的风险因素</h3>
             <span class="hint">全校人均摊到的分数</span>
           </div>
-          <FactorBars v-if="pressure.length" :items="pressure" mode="pressure" />
+          <FactorBars v-if="pressure.length" :items="pressure" mode="pressure" tall />
         </div>
       </div>
 
@@ -493,6 +493,29 @@ async function exportCSV() {
 <style scoped>
 .board-top {
   scroll-margin-top: 12px;
+}
+/* 全校概览这一行不跟全局 1.15:1 走。
+   环形图收到 216 之后，左边再留那么宽就只剩白纸了；把左栏收窄一档、
+   右栏让出宽度，「最普遍的风险因素」那条整体左移约 70px，
+   两栏的分界正好落在环与图例的视觉重心上。 */
+.board-cols {
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+}
+/* 全局那条「相邻卡片自动留 14px」是给上下叠放的卡用的；这两张是并排的两栏，
+   带上它右栏会被整卡往下推 14px，两张卡顶边就不齐了。 */
+.board-cols > .card + .card {
+  margin-top: 0;
+}
+/* 左栏被拉到与右栏等高之后，环在整段高度里垂直居中，
+   而不是堆在卡顶、底下空一截 */
+.board-cols > .card:first-child {
+  display: flex;
+  flex-direction: column;
+}
+.board-cols > .card:first-child > div:not(.card-head) {
+  flex: 1;
+  display: flex;
+  justify-content: center;
 }
 .import-grid {
   display: grid;

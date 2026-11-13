@@ -12,8 +12,10 @@ const props = withDefaults(
     items: FactorItem[];
     /** ratio: 用归一化后的 value 画长度；pressure: 用均摊分数画长度 */
     mode?: "ratio" | "pressure";
+    /** 条子加粗、行距放开：只给教务看板那种「和放大版环形图并排」的场景用 */
+    tall?: boolean;
   }>(),
-  { mode: "ratio" },
+  { mode: "ratio", tall: false },
 );
 
 const rows = computed(() =>
@@ -28,7 +30,7 @@ const rows = computed(() =>
 </script>
 
 <template>
-  <div>
+  <div class="factor-bars" :class="{ tall: props.tall }">
     <div v-for="f in rows" :key="f.label" class="factor">
       <div class="factor-top">
         <b>{{ f.label }}</b>

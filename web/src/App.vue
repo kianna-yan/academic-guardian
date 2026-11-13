@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { ElMessage } from "element-plus/es/components/message/index";
@@ -170,7 +170,6 @@ function armWipe() {
     dropBootVeil();
     if (!wiping.value) {
       veilUp.value = false;
-      flushNotices();
     }
   }, 6000);
 }
@@ -242,7 +241,6 @@ function onWipeDone() {
   wiping.value = false;
   dropBootVeil();
   veilUp.value = false;
-  flushNotices();
 }
 
 
@@ -262,39 +260,24 @@ watch(isLogin, (login) => {
   if (!login && auth.profile) chat.ensure(role.value);
 });
 
-// ---- 消息中心：登录后开始轮询，退出即停；新通知到 → 右下角弹窗 ----
-/**
- * 开屏期间到的消息先排在这里。
- * 幕布盖满整屏时弹窗只会被压在下面，人根本看不见；等幕布散尽再一起弹，
- * 才真正做到"进端口就告诉你有什么新消息"。
- */
-const queuedNotices: NoticeItem[] = [];
+// ---- 消息中心：登录后开始轮询，退出即停；未读的头部几条投影成右上角那一列卡片 ----
 
-/**
- * 右上角的消息栈。
- *
- * 原来用 ElNotification 一条条弹，三条全展开能压掉右侧 570px 高度——进门第一屏
- * 半屏都是字，看板本身反而被挡住。改成「折叠成一列，鼠标移上去才展开」后，
- * 三条只占一条半卡片的高度，想知道细节再悬停。
- * 卡片宽度仍是 330px，展开后的正文仍是 14px/1.6——就是原来那张通知的样子。
- */
 interface StackNotice {
   key: string;
   warn: boolean;
   n: NoticeItem;
 }
-const noticeStack = ref<StackNotice[]>([]);
-
 /**
- * 本次登录的弹窗纪律：
- * - 报到只播一次：进门落地报一回，之后在门户与板块之间来回走都不再重播。
- *   叉掉就是叉掉了，不用每回一次门户又被同一批提醒怼一次脸。
- * - 被叉掉的通知 id 记下来：轮询（onArrive）若因为服务端未读状态没变而把同一条
- *   又送进来，直接拦掉，不会"关了又弹"。
- * - 两者都写进 sessionStorage：同一标签页刷新页面（演示时最容易手滑）也不重播；
- *   关掉标签页或退出登录即清空，重新登录理应重新报到一次。
+ * 右上角这一列消息卡片 = **当前未读的投影**，只在端口首页出现。
+ *
+ * 规则（按 2026-11-13 的反馈定）：
+ * - 只在对应端口的首页出现。点进看板、对话、课表这些内页时整列隐藏——那里正在读
+ *   具体的表和图，卡片只会挡路；右上角铃铛的红点照常，消息本身一条都不丢。
+ * - 回到首页还在。以前是「一场登录只报到一次」，从内页退回门户就一条都不剩，用起来
+ *   像消息自己消失了。现在只要没叉掉，回几次都在。
+ * - 叉掉才算处理。叉掉记 id 并写进 sessionStorage：刷新页面、内页来回切都不再冒出来；
+ *   但铃铛红点不动——不标已读，只是不再弹脸。
  */
-const SS_REPORT = "ag.notice.reported.";
 const SS_DISMISS = "ag.notice.dismissed";
 
 function ssReadIds(k: string): string[] {
@@ -305,108 +288,55 @@ function ssReadIds(k: string): string[] {
     return [];
   }
 }
-function ssReadFlag(k: string): boolean {
-  try {
-    return sessionStorage.getItem(k) === "1";
-  } catch {
-    return false;
-  }
-}
 function ssWrite(k: string, v: string) {
   try {
     sessionStorage.setItem(k, v);
   } catch {
-    /* 隐私模式禁写：退回纯内存，行为不变，只是刷新后会重播 */
+    /* 隐私模式禁写：退回纯内存，行为不变，只是刷新后叉掉的记账丢了 */
   }
 }
 
-let reportedAccount = "";
-const dismissedKeys = new Set<string>(ssReadIds(SS_DISMISS));
+/** 叉掉的 id：用 reactive Set，has() 才会被上面的 computed 追到 */
+const dismissedKeys = reactive(new Set<string>(ssReadIds(SS_DISMISS)));
 
-function pushNotice(n: NoticeItem) {
-  // 只在端口首屏弹：进了看板的某一板块之后，右上角这列卡片会压住正要看的表和图，
-  // 而且那时候人已经在读具体内容，不该再被"进门口播报"打断。铃铛红点照常在。
-  if (!route.meta.home) return;
-  // 本次登录已经叉掉过这条：轮询再撞上来也不再复现
-  if (dismissedKeys.has(n.id)) return;
-  // 同一条通知（同一个 id）不重复入栈：报到弹窗与轮询回调可能撞在一起
-  if (noticeStack.value.some((r) => r.key === n.id)) return;
-  noticeStack.value.push({
-    key: n.id,
-    // 旷课与新异议用橙色感叹号，其余用灰色 i —— 与原通知的 type 映射一致
-    warn: n.kind === "absent" || n.kind === "appeal_new",
-    n,
-  });
-  // 最多留三条：再多就只是噪音，剩下的都在铃铛里
-  if (noticeStack.value.length > 3) {
-    noticeStack.value.splice(0, noticeStack.value.length - 3);
-  }
+/** 窄屏不弹：顶部导航只有 40px 高，卡片一盖就把五个入口挡住；窄屏本来也靠铃铛红点 */
+const narrow = ref(false);
+function syncNarrow() {
+  narrow.value = window.innerWidth <= 760;
 }
+syncNarrow();
+window.addEventListener("resize", syncNarrow);
+onUnmounted(() => window.removeEventListener("resize", syncNarrow));
+
+const noticeStack = computed<StackNotice[]>(() => {
+  // 不在端口首屏就不出：内页（看板/课表/对话整页）正在读具体内容，卡片只会挡路。
+  // AI 抽屉也算"进了别的窗口"——它是盖在首屏上的一层，卡片会浮在对话正文上面，
+  // 所以打开抽屉时同样收起来，关掉抽屉回到底层首屏再自己长回来。
+  if (!isHome.value || narrow.value || chat.aiOpen) return [];
+  return notices.unread
+    .filter((n) => !dismissedKeys.has(n.id))
+    .slice(0, 3)                       // 最多三条：再多只是噪音，剩下的都在铃铛里
+    .map((n) => ({
+      key: n.id,
+      // 旷课与新异议用橙色感叹号，其余用灰色 i —— 与消息中心的 kind 映射一致
+      warn: n.kind === "absent" || n.kind === "appeal_new",
+      n,
+    }));
+});
 
 /**
- * 叉掉：关掉这条提醒，并记进本次登录的"别再来"名单。
- * 不标已读——铃铛红点照旧，消息本身仍在消息中心里，只是不再弹脸。
+ * 叉掉：这条不再弹脸，并记进本标签页的「别再来」名单。
+ * 不标已读——铃铛红点照旧，消息本身仍在消息中心里，只是不再挡在页面上。
  */
 function dismissNotice(key: string) {
   dismissedKeys.add(key);
   ssWrite(SS_DISMISS, JSON.stringify([...dismissedKeys]));
-  const at = noticeStack.value.findIndex((r) => r.key === key);
-  if (at >= 0) noticeStack.value.splice(at, 1);
 }
 
-/**
- * 弹一条：折叠态只露标题，鼠标移上去展开全文（展开动作在 NoticeStack 里，
- * 这里只负责入栈）。不自动消失，要关得自己点叉——重要消息不该一闪而过。
- */
-function showNotice(n: NoticeItem) {
-  pushNotice(n);
-}
-
-function flushNotices() {
-  if (!queuedNotices.length) return;
-  if (window.innerWidth <= 760) {
-    queuedNotices.length = 0;
-    return;
-  }
-  const batch = queuedNotices.splice(0, queuedNotices.length);
-  // 每条错开 120ms：三条同时蹦出来像报错，一条条落下来才看得清
-  batch.forEach((n, i) => window.setTimeout(() => showNotice(n), i * 120));
-}
-
-/**
- * 进端口的「报到」：先拉一次最新的，再把当前未读的头部几条弹出来。
- *
- * **一个端只在进场时播一次**。以前是"只要还没读，每次进门都再报一遍"，
- * 结果在门户和板块之间来回走、或者从别的端切回来，同一批提醒会反复怼到脸上；
- * 叉掉也没用，回一次门户又弹回来。现在按账号记一次：已经报到过就直接返回，
- * 想看历史消息走右上角铃铛，铃铛红点是另一套逻辑，不受影响。
- */
-async function popPortNotices() {
-  if (isLogin.value || !auth.profile) return;
-  if (window.innerWidth <= 760) return;   // 手机端不弹，靠铃铛红点
-  const account = auth.profile.account || "";
-  // 本场登录 + 本标签页已经报到过：不再重播（刷新页面也一样）
-  if (reportedAccount === account) return;
-  if (ssReadFlag(`${SS_REPORT}${account}`)) {
-    reportedAccount = account;            // 同步内存记号，省掉后面的重复判断
-    return;
-  }
-  reportedAccount = account;
-  ssWrite(`${SS_REPORT}${account}`, "1");
-  await notices.refresh(true);            // 进门前先刷新，弹的是最新数据
-  const list = notices.popUnread(3);
-  for (const n of list) {
-    // 幕布还盖着（首屏静态幕 / 预备幕 / 开屏动画）：先进队列，散尽再弹
-    if (veilUp.value) queuedNotices.push(n);
-    else showNotice(n);
-  }
-}
-
-let stopArrive: (() => void) | null = null;
 /**
  * 是否真的登录过。profile 是异步 hydrate 的——页面刷新时这个 watch 会先以
- * `undefined` 触发一次，如果那时就当"退出登录"去清 sessionStorage 里的报到记号，
- * 刷新后消息弹窗又会被重播一遍。只有"登录过之后又掉成空"才算退出。
+ * `undefined` 触发一次，如果那时就当"退出登录"去清 sessionStorage 里的叉掉记号，
+ * 刷新后叉掉的提醒又会冒回来。只有"登录过之后又掉成空"才算退出。
  */
 let hadProfile = false;
 watch(
@@ -414,37 +344,20 @@ watch(
   (acc) => {
     if (acc && !isLogin.value) {
       hadProfile = true;
+      // 拉一次 + 每 25 秒轮询就够了：卡片本身就是 unread 的投影，
+      // 数据一变自己就跟着变，不需要再订阅「新通知到达」手工入栈。
       notices.start();
-      stopArrive?.();
-      stopArrive = notices.onArrive((items) => {
-        // 手机端不弹右下角通知：顶部导航只有 40px 高，弹窗一盖就把入口挡住了，
-        // 消息本来就靠右上角铃铛上的红点提示，不必再抢一次注意力。
-        if (window.innerWidth <= 760) return;
-        for (const n of items.slice(0, 3)) {
-          // 幕布盖着（首屏静态幕 / 预备幕 / 开屏动画）：先攒着，散尽再弹
-          if (veilUp.value) queuedNotices.push(n);
-          else showNotice(n);
-        }
-      });
     } else {
       notices.stop();
-      stopArrive?.();
-      stopArrive = null;
-      // 退出登录：上一个人的提醒不该留给下一个人看，
-      // "已报到 / 已叉掉"的记号也要清——重新登录应当重新报到一次
-      noticeStack.value = [];
-      queuedNotices.length = 0;
-      reportedAccount = "";
+      // 退出登录：上一个人的提醒不该留给下一个人看，叉掉的记号也一并清掉，
+      // 下一个人登录时看到的应当是他自己的未读。
       dismissedKeys.clear();
       // 只有"登录过再退出"才动 sessionStorage：启动时的空 profile 不清，
-      // 否则刷新就等于重新登录，弹窗会重来一遍
+      // 否则刷新就等于重新登录，叉掉的记录又回来了
       if (!hadProfile) return;
       hadProfile = false;
       try {
-        // 退出时不知道下一个是谁，把本会话所有报到/叉掉记号一并清掉
-        Object.keys(sessionStorage)
-          .filter((k) => k.startsWith(SS_REPORT) || k === SS_DISMISS)
-          .forEach((k) => sessionStorage.removeItem(k));
+        sessionStorage.removeItem(SS_DISMISS);
       } catch {
         /* 隐私模式禁写，忽略 */
       }
@@ -469,36 +382,14 @@ watch(
  * 轮询是 25 秒一轮，切页时刚好错开就会看到旧数据（例如别处刚发来的家校消息
  * 在侧栏没有红点）。
  *
- * 这里保持静默：弹窗只在两条路上出现——「进端口报到」（popPortNotices）
- * 和轮询发现的新消息（onArrive）。三处都弹的话同一批消息会出现两三遍。
+ * 弹窗不用在这里管：卡片是 `isHome` + unread 的投影，换页时自己就出现/收起，
+ * 不会出现「同一批消息弹两遍」。
  */
 watch(
   () => route.path,
   () => {
-    // 离开端口首屏就把这列卡片收掉：板块页里它只会挡住内容。
-    // 回到首屏时不会重新播报（报到是一次性的），但铃铛红点与消息中心照旧。
-    if (!route.meta.home) {
-      noticeStack.value = [];
-      queuedNotices.length = 0;
-    }
     if (!isLogin.value && auth.profile) void notices.refresh(true);
   },
-);
-
-/**
- * 进端口 → 报到弹窗。
- *
- * 每次路由变化都问一次，但 popPortNotices 内部按账号只放行一次：
- * 落地进自己的端、从板块退回门户、在端之间切换，都不会把同一批提醒再播一遍。
- * 想看没看完的消息，走右上角铃铛。
- */
-watch(
-  () => `${route.path}|${route.meta.home ? 1 : 0}|${auth.profile?.account ?? ""}`,
-  () => {
-    if (!route.name || route.name === "login" || !route.meta.home || !auth.profile || isLogin.value) return;
-    void popPortNotices();
-  },
-  { immediate: true },
 );
 
 /** 页内锚点与 AI 抽屉开合不换页，只补一次静默刷新，不打扰人 */

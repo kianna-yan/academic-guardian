@@ -600,6 +600,22 @@ a {
 .factor:last-child {
   margin-bottom: 0;
 }
+/* 教务看板右栏：左栏环形图放大到 226 之后，右边六条按同样的分量配平——
+   条子从 7px 加到 8px、行距从 12px 放到 15px，两栏看着是一张图里的东西。
+   只在 .tall 时生效，学生端画像里那一组仍是紧凑版。 */
+.factor-bars.tall .factor {
+  margin-bottom: 15px;
+}
+.factor-bars.tall .factor:last-child {
+  margin-bottom: 0;
+}
+.factor-bars.tall .factor-top {
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+.factor-bars.tall .bar {
+  height: 8px;
+}
 .factor-top {
   display: flex;
   justify-content: space-between;

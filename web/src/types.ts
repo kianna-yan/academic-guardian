@@ -330,6 +330,10 @@ export interface PortalSummary {
   focus: { tag: string; title: string; meta: string }[];
   focus_title: string;
   model: string;
+  /** 意图路由用的快模型（glm-4.5-air），作答模型是 model（glm-5.3-flash） */
+  model_route?: string;
+  /** 后端是否真的配了 key；没配时徽标写「规则兜底」，别和黄条自相矛盾 */
+  model_online?: boolean;
 }
 
 export interface Citation {

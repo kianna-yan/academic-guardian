@@ -645,11 +645,17 @@ def portal_summary(request: Request):
     else:
         focus_title = "本周关注"
 
+    st = llm.status()
     return {
         "stats": stats,
         "focus": focus,
         "focus_title": focus_title,
-        "model": llm.status().get("model", ""),
+        "model": st.get("model", ""),
+        # 门户页脚那行小字要写清「这个端口接的是哪只模型」：
+        # 作答是 glm-5.3-flash（model），意图路由是 glm-4.5-air（model_route）。
+        # 以前只回一个 model，前端拿不到第二只，只能显示一只或干脆写死。
+        "model_route": st.get("route_model", ""),
+        "model_online": bool(st.get("enabled")),
     }
 
 

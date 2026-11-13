@@ -27,14 +27,18 @@ const draft = ref("");
 const stream = ref<HTMLElement | null>(null);
 
 /** 右下角那块「已接入大模型」的牌子：模型名直接读后端 /meta，不写死 */
-const modelName = computed(() => String(app.meta?.llm?.model || "").trim());
-const modelLine = computed(() => (modelName.value ? `${modelName.value} · 实时推理` : "学情数据 · 实时推理"));
+const modelName = computed(() => String(app.meta?.llm?.model || "glm-5.3-flash").trim());
+/** 没配 key 就别写「实时推理」：顶上黄条正说着「模型未接入」，两边对不上 */
+const modelOnline = computed(() => app.meta?.llm?.enabled !== false);
+const modelLine = computed(
+  () => `${modelName.value} · ${modelOnline.value ? "实时推理" : "规则兜底"}`,
+);
 /**
- * 第二个模型：后端 .env 里另配了一只快模型（LLM_ROUTE_MODEL），只负责
- * 「这句话该调哪个工具」，首字延迟比主模型低一个量级。牌子上一并亮出来，
+ * 第二个模型：后端 .env 里另配了一只快模型（LLM_ROUTE_MODEL = glm-4.5-air），
+ * 只负责「这句话该调哪个工具」，首字延迟比主模型低一个量级。牌子上一并亮出来，
  * 免得看的人以为只接了一个模型。
  */
-const routeName = computed(() => String(app.meta?.llm?.route_model || "").trim());
+const routeName = computed(() => String(app.meta?.llm?.route_model || "glm-4.5-air").trim());
 const routeLine = computed(() =>
   routeName.value && routeName.value !== modelName.value ? `${routeName.value} · 意图路由` : "",
 );

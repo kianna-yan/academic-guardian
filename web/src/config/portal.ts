@@ -257,7 +257,7 @@ export const PORTAL: Record<Role, PortalMeta> = {
     solid: "总控台",
     mark: "PIPELINE / GOVERN",
     trace: "RULE → RECALC → RANK → EXPORT",
-    lead: "红线一改，全校重算——",
+    lead: "红线一改，全校重算",
     tail: "件事你得盯",
     sub: "分布、对比、排行都在同一屏，改完阈值立刻落到各端。账号和课程也在这张图上维护，不用逐级通知。",
     focusTag: "本校",
@@ -281,7 +281,7 @@ export const PORTAL: Record<Role, PortalMeta> = {
     trace: "SCORE → RISK → CARE → LETTER",
     lead: "不用看懂分数，",
     tail: "件事和你有关",
-    sub: "孩子在学校怎么样、学校做了什么、家里能配合什么——都用人话写，点开就能回一句。",
+    sub: "孩子在学校怎么样、学校做了什么、家里能配合什么——用数据说话，点开就能回一句。",
     focusTag: "我家",
   },
 };
