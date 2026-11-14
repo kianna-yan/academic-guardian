@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index";
 import { useAuthStore } from "@/stores/auth";
 import { useNoticeStore } from "@/stores/notices";
+import VoiceWave from "@/components/VoiceWave.vue";
+import VoiceClip from "@/components/VoiceClip.vue";
 import { api } from "@/api/client";
 import {
   humanSize,
@@ -405,11 +407,12 @@ function backHome() {
                   >
                     <img :src="a.data" :alt="a.name || '照片'" />
                   </a>
-                  <div v-else-if="a.kind === 'audio' && a.data" class="bm-audio">
-                    <span class="bm-audio-ico" aria-hidden="true">🎤</span>
-                    <audio :src="a.data" controls preload="metadata"></audio>
-                    <span v-if="a.duration" class="bm-audio-sec">{{ a.duration }}″</span>
-                  </div>
+                  <VoiceClip
+                    v-else-if="a.kind === 'audio' && a.data"
+                    :src="a.data"
+                    :duration="a.duration"
+                    :out="m.from_role === role ? 'left' : 'right'"
+                  />
                   <div v-else class="bm-file">
                     <span aria-hidden="true">{{ MEDIA_ICON[a.kind] || "📎" }}</span>
                     {{ a.name || "附件" }}
@@ -427,6 +430,7 @@ function backHome() {
             <div v-if="pending.length" class="ci-attach">
               <div v-for="a in pending" :key="a.id" class="ci-item">
                 <img v-if="a.kind === 'image' && a.thumb" :src="a.thumb" :alt="a.name" />
+                <span v-else-if="a.kind === 'audio'" class="ci-ico ci-ico-voice"><VoiceWave :size="15" /></span>
                 <span v-else class="ci-ico">{{ MEDIA_ICON[a.kind] }}</span>
                 <div class="ci-meta">
                   <b>{{ a.kind === "image" ? "照片" : a.kind === "audio" ? "语音" : a.name }}</b>
@@ -1046,26 +1050,10 @@ function backHome() {
   object-fit: contain;
   border-radius: 8px;
 }
-.bm-audio {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #fff;
-  max-width: 300px;
-}
-.bm-audio-ico {
-  font-size: 14px;
-}
-.bm-audio audio {
-  height: 30px;
-  max-width: 210px;
-}
-.bm-audio-sec {
-  font-size: 11px;
-  color: var(--muted);
+/* 语音条本身搬进 VoiceClip.vue，和「问 AI」那边共用同一份结构；
+   这里只剩待发附件小格子里的那串声波 */
+.ci-ico-voice {
+  color: var(--moss);
 }
 .bm-transcript {
   margin: 0;

@@ -52,6 +52,8 @@ declare module 'vue' {
     TopBar: typeof import('./components/TopBar.vue')['default']
     TraceSteps: typeof import('./components/TraceSteps.vue')['default']
     TrendSpark: typeof import('./components/TrendSpark.vue')['default']
+    VoiceClip: typeof import('./components/VoiceClip.vue')['default']
+    VoiceWave: typeof import('./components/VoiceWave.vue')['default']
     WeeklyAttend: typeof import('./components/WeeklyAttend.vue')['default']
     WisdomTree: typeof import('./components/WisdomTree.vue')['default']
   }

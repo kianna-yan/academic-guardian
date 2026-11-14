@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AgentBriefing from "@/components/AgentBriefing.vue";
 import CitationList from "@/components/CitationList.vue";
 import MarkdownBody from "@/components/MarkdownBody.vue";
+import VoiceClip from "@/components/VoiceClip.vue";
 import TraceSteps from "@/components/TraceSteps.vue";
 import { useChatStore, DEFAULT_SUGGEST } from "@/stores/chat";
 import { useAppStore } from "@/stores/app";
@@ -562,6 +563,32 @@ function hideHoverTip() {
   hoverTip.value = null;
 }
 
+/**
+ * 这条消息是不是「只带语音、没有一句话」。
+ * 是的话气泡就收成语音条自己的外框——方角气泡套圆胶囊，四角会露出四个深绿小尖。
+ */
+/**
+ * 带语音的气泡统一换成家校沟通那条浅绿外框。
+ * 只要附件里有语音就算——哪怕还带了转写，也不能让白胶囊陷在深绿实底里。
+ */
+function hasAudio(m: { from: string; media?: { kind: string }[] }): boolean {
+  return m.from === "user" && !!m.media?.some((a) => a.kind === "audio");
+}
+
+function onlyVoice(m: {
+  from: string;
+  text?: string;
+  media?: { kind: string; transcript?: string }[];
+}): boolean {
+  return (
+    m.from === "user" &&
+    !String(m.text || "").trim() &&
+    !!m.media?.length &&
+    // 带转写的不算：下面还要吊一行「用户说了什么」，胶囊圆角会把它卡在弧边上
+    m.media.every((a) => a.kind === "audio" && !a.transcript)
+  );
+}
+
 /** 输入框有字、有附件或挂着提示词胶囊，都可以发送 */
 const canSend = computed(
   () => Boolean(draft.value.trim()) || attachments.value.length > 0 || promptTags.value.length > 0,
@@ -704,19 +731,30 @@ function intentLabel(v: string): string {
         <AgentBriefing :role="role" />
 
         <div v-for="m in chat.messages" :key="m.id" class="msg" :class="{ user: m.from === 'user' }">
-          <div class="bubble">
+          <div
+            class="bubble"
+            :class="{ 'bubble-voice': onlyVoice(m), 'bubble-audio': hasAudio(m) }"
+          >
             <template v-if="m.from === 'user'">
               <div v-if="m.media && m.media.length" class="bubble-media">
-                <div v-for="(a, i) in m.media" :key="i" class="bm-item">
-                  <img v-if="a.thumb" :src="a.thumb" :alt="a.name" class="bm-thumb" />
-                  <span v-else class="bm-ico">{{ MEDIA_ICON[a.kind] }}</span>
-                  <div class="bm-side">
-                    <span class="bm-name">{{ a.name }}</span>
-                    <span v-if="a.transcript" class="bm-said">「{{ a.transcript }}」</span>
-                    <span v-else-if="a.chars" class="bm-said">约 {{ a.chars }} 字</span>
-                    <span v-else-if="a.duration" class="bm-said">{{ a.duration }} 秒</span>
+                <template v-for="(a, i) in m.media" :key="i">
+                  <!-- 语音不画文件盒，也不摆一行「文件名 + 时长」让人猜：
+                       直接给一条能点的语音条，和家校沟通那边长得一模一样 -->
+                  <div v-if="a.kind === 'audio'" class="bm-item bm-item-voice">
+                    <VoiceClip :src="a.data" :name="a.name" :duration="a.duration" out="left" />
+                    <span v-if="a.transcript" class="bm-said bm-said-out">「{{ a.transcript }}」</span>
                   </div>
-                </div>
+                  <div v-else class="bm-item">
+                    <img v-if="a.thumb" :src="a.thumb" :alt="a.name" class="bm-thumb" />
+                    <span v-else class="bm-ico">{{ MEDIA_ICON[a.kind] }}</span>
+                    <div class="bm-side">
+                      <span class="bm-name">{{ a.name }}</span>
+                      <span v-if="a.transcript" class="bm-said">「{{ a.transcript }}」</span>
+                      <span v-else-if="a.chars" class="bm-said">约 {{ a.chars }} 字</span>
+                      <span v-else-if="a.duration" class="bm-said">{{ a.duration }} 秒</span>
+                    </div>
+                  </div>
+                </template>
               </div>
               {{ m.text }}
             </template>
@@ -1008,7 +1046,7 @@ function intentLabel(v: string): string {
                         />
                       </svg>
                     </span>
-                    <span class="tx"><b>Skill</b><i>报告 · 文书 · 家校演练</i></span>
+                    <span class="tx"><b>技能</b><i>报告 · 文书 · 家校演练</i></span>
                     <span class="arr">›</span>
                   </button>
 
@@ -1050,7 +1088,7 @@ function intentLabel(v: string): string {
                           <span class="tx"><b>{{ s.name }}</b><i>{{ s.desc }}</i></span>
                           <span v-if="s.subs?.length" class="sub-arr">›</span>
                         </button>
-                        <div v-if="!skills.length" class="sub-empty">技能列表没加载出来，再点一次 Skill</div>
+                        <div v-if="!skills.length" class="sub-empty">技能列表没加载出来，再点一次「技能」</div>
                       </template>
                     </div>
                   </transition>
@@ -1542,6 +1580,31 @@ function intentLabel(v: string): string {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.55);
   font-size: 18px;
+}
+/* 语音气泡：外框照抄家校沟通那条自己发的消息——浅苔绿底 + 一圈细墨绿描边、
+   12px 方角，里面才是白色胶囊（尺寸也对齐：9px 13px 内边距）。原来直接用用户
+   气泡的深绿实底，白胶囊被一圈 4px 深绿死死圈住，跟家校沟通那边根本不是一回事。 */
+.chat-stream .msg.user .bubble.bubble-audio {
+  background: var(--brand-soft);
+  border: 1px solid var(--brand);
+  color: var(--text-2);
+  padding: 9px 13px;
+  border-radius: 12px;
+}
+.chat-stream .msg.user .bubble.bubble-audio .bubble-media {
+  margin-bottom: 0;
+}
+/* 语音条那一行：气泡宽度跟着内容走，转写文字另起一行吊在下面 */
+.bm-item-voice {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.bm-item-voice .bm-said-out {
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--muted);
+  max-width: 100%;
 }
 .bm-side {
   display: flex;

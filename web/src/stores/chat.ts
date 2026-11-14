@@ -28,6 +28,15 @@ export interface ChatMedia {
   thumb?: string;
   duration?: number;
   transcript?: string;
+  /**
+   * 只有语音留 dataURL。
+   *
+   * 之前一律不留，气泡里就只剩「语音 19:32.webm / 2.9 秒」两行字——看得出有这段语音，
+   * 却放不出来。语音条既然做成播放式的，就得真能按下去响；而语音本来就短，
+   * 一条几秒的 webm 转成 dataURL 也就几十 KB，40 条上限撑得住。
+   * 图片、视频仍然只留缩略图，那是几百 KB 到几 MB 的量级，不能塞进 localStorage。
+   */
+  data?: string;
   /** kind=text（上传文档）时抽出来的字数 */
   chars?: number;
 }
@@ -66,10 +75,41 @@ function loadSession(role: Role, account: string): ChatMessage[] {
     const raw = localStorage.getItem(sessionKey(role, account));
     if (!raw) return [];
     const rows = JSON.parse(raw) as ChatMessage[];
-    return Array.isArray(rows) ? rows : [];
+    if (!Array.isArray(rows)) return [];
+    const clean = pruneDeadAudio(rows);
+    // 真摘掉了就顺手写回，省得脏数据一直躺在存档里、每次进页面都要再筛一遍
+    if (clean.length !== rows.length || clean.some((m, i) => m.media !== rows[i].media)) {
+      saveSession(role, account, clean);
+    }
+    return clean;
   } catch {
     return [];
   }
+}
+
+/**
+ * 清掉老会话里「没有原音」的语音。
+ *
+ * 上一版之前，语音附件的 base64 一律不进存档，气泡里只剩一行「语音 19:32.webm / 2.9 秒」，
+ * 按下去没声。这种残骸跟新版语音条放在一起，一半能播一半不能——看着就是坏掉的控件。
+ * 加载时顺手摘掉：只摘没有原音的语音附件，文字、图片缩略图和其他附件都留着；
+ * 整条消息因此变空的才删。
+ */
+function pruneDeadAudio(rows: ChatMessage[]): ChatMessage[] {
+  return rows
+    .map((m) => {
+      if (!m.media?.length) return m;
+      const alive = m.media.filter((a) => a.kind !== "audio" || !!a.data);
+      if (alive.length === m.media.length) return m;
+      return { ...m, media: alive.length ? alive : undefined };
+    })
+    .filter(
+      (m) =>
+        !!String(m.text || "").trim() ||
+        !!m.media?.length ||
+        !!m.thoughts?.length ||
+        !!m.citations?.length,
+    );
 }
 
 function saveSession(role: Role, account: string, msgs: ChatMessage[]): void {
@@ -207,6 +247,8 @@ export const useChatStore = defineStore("chat", () => {
       thumb: m.thumb,
       duration: m.duration,
       transcript: m.transcript,
+      // 语音留原音（几十 KB）；超过 160KB 的截断留下，宁可不播也不要把存档撑爆
+      data: m.kind === "audio" && m.data && m.data.length <= 160_000 ? m.data : undefined,
       chars: m.chars,
     }));
 
