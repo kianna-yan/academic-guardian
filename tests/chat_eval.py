@@ -36,6 +36,24 @@ from engine.risk import RiskEngine  # noqa: E402
 # 改造前那条硬编码兜底话术。任何一条回答里出现它，就说明模型没接住这个问题。
 CANNED = ("这个问题我答不准", "我擅长帮你看", "可以问我：")
 
+# ---------------------------------------------------------------------------
+# 期望值不写死人名和分数
+# ---------------------------------------------------------------------------
+# 原来这里写的是「戴永康最危险」「本人 71 分」「2402 班苏欣怡第一」，11.13 那版换了
+# seed 之后三个人名/分数全变了，于是三条用例红着——但系统答的其实是对的（苏亦菲
+# 63.6、戴永康 50、潘子轩 90.7 都能在 roster 里查到）。这种「假失败」最要命：
+# 评审看到红色以为系统有毛病，我们自己也会误判成模型在串数。
+# 所以改成从引擎实时取期望值。本套用例要测的是「回答里的数字和系统里的是不是同一个」，
+# 不是数据本身对不对——数据对不对由 number_trace.py 和单元测试管。
+_ENGINE = RiskEngine(data.db())
+_ROSTER = _ENGINE.roster()
+_TOP_RISK = _ROSTER[0]["name"] if _ROSTER else ""
+_SELF = _ENGINE.score("20240063")           # 20240063 = 戴永康，学生端问答用它
+_SELF_SCORE = f"{_SELF['score']:g}" if _SELF.get("score") is not None else ""
+_C2402 = max((x for x in _ROSTER if x.get("class_name") == "计科2402"),
+             key=lambda x: x.get("mid_avg") or 0, default=None)
+_TOP_2402 = _C2402["name"] if _C2402 else ""
+
 # role, 账号, 密码, 问题, 类别, 期望（must_tool=必须调工具 / 含 must_contain 里的任一关键词 /
 #                                  min_len 最短字数 / forbid 不许出现的词）
 # 关于「不许调工具」：一开始我把通用题写成 must_tool=False，结果全被判失败——
@@ -45,10 +63,10 @@ CASES: list[dict] = [
     # ---------- 一、取数题（10 条）----------
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "戴永康这学期怎么样", "kind": "取数", "must_tool": True,
-     "must_contain": ["71.0", "出勤"], "note": "点名查学生，数字必须与风险引擎一致"},
+     "must_contain": [_SELF_SCORE, "出勤"], "note": "点名查学生，数字必须与风险引擎一致"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "帮我看看谁最危险", "kind": "取数", "must_tool": True,
-     "must_contain": ["戴永康"], "note": "名单类，必须先取 roster"},
+     "must_contain": [_TOP_RISK], "note": "名单类，必须先取 roster"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "他旷了几次课", "kind": "取数", "must_tool": True,
      "must_contain": ["次"], "note": "代词指代，考验多轮"},
@@ -69,7 +87,7 @@ CASES: list[dict] = [
      "must_contain": ["99"], "note": "Linda Chen 的课及格率 99.2%"},
     {"role": "student", "acc": "20240063", "pwd": "0000",
      "q": "我的风险分是多少", "kind": "取数", "must_tool": True,
-     "must_contain": ["71"], "note": "学生问「我」，必须锁本人"},
+     "must_contain": [_SELF_SCORE], "note": "学生问「我」，必须锁本人"},
     {"role": "parent", "acc": "20240063", "pwd": "3333",
      "q": "我孩子最近表现怎么样", "kind": "取数", "must_tool": True,
      "must_contain": ["戴永康"], "note": "家长只能看自己孩子"},
@@ -136,7 +154,7 @@ CASES: list[dict] = [
      "must_contain": ["分"], "note": "家长端也要能答成绩"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "计科2402谁成绩最好", "kind": "成绩",
-     "must_contain": ["苏欣怡"], "note": "班级成绩排名，必须点名到人"},
+     "must_contain": [_TOP_2402], "note": "班级成绩排名，必须点名到人"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "计科2404班平均分多少", "kind": "成绩",
      "must_contain": ["78.9", "79"], "note": "班级均分"},
