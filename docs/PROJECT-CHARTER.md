@@ -21,7 +21,7 @@
 | 所属院校 | 普通本科院校（B 组） |
 | 项目周期 | 2026 年 10 月 — 2026 年 11 月 |
 | 代码仓库 | https://github.com/kianna-yan/academic-guardian |
-| 线上演示 | https://wbapp-231hvkygsmwpgleer3h7o.app.workbuddy.host/?sharecode=SP3ET5NZQM |
+| 线上演示 | https://wbapp-gdkkh3gwxlpak662vqg26g.app.workbuddy.host/?sharecode=ERQK4OB6P2 |
 
 ---
 
