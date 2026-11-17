@@ -6,7 +6,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `knowledge/*.md` | 语料（16 篇 / 88 个片段 / 约 6800 字），每篇带 front-matter（学校 / 文件 / 生效） |
+| `knowledge/*.md` | 语料（16 篇 / 88 个片段 / 约 6900 字），每篇带 front-matter（学校 / 文件 / 生效） |
 | `engine/rag.py` | 分块、双通道检索、融合、重排、查询改写、向量缓存 |
 | `engine/agent.py` → `call_rag()` | 把检索接进问答链路，并把检索过程写进轨迹 |
 | `engine/media_memory.py` | 会话级材料记忆（图片 / 视频 / 语音） |
