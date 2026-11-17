@@ -351,6 +351,8 @@ export interface MediaPayload {
   name?: string;
   mime?: string;
   data?: string;
+  /** 语音专供识别的 16kHz WAV（同 data，但格式是 glm-asr 认的那种） */
+  asr?: string;
   frames?: string[];
   duration?: number;
   transcript?: string;

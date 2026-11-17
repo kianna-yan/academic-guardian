@@ -236,6 +236,10 @@ export const useChatStore = defineStore("chat", () => {
     const content = text.trim();
     const media = attachments.filter(Boolean);
     if (!content && !media.length) return;
+    // 只带语音、又没有转写文字时，不要拿「看看我发的这个」当问题：
+    // 后端只会对着一段听不清的录音猜，答出来的东西跟用户说的没关系。
+    // 正常路径下前端不会让这种消息发出来，这里再兜一层。
+    if (!content && media.length && media.every((m) => m.kind === "audio")) return;
     if (streaming.value) return;
     ensure(role);
     const account = auth.profile?.account || "anon";
@@ -281,6 +285,7 @@ export const useChatStore = defineStore("chat", () => {
       name: m.name,
       mime: m.mime,
       data: m.data,
+      asr: m.asr,
       frames: m.frames,
       duration: m.duration,
       transcript: m.transcript,

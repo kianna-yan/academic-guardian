@@ -217,7 +217,7 @@ async function stopRec() {
     const media = await handle.stop();
     // 顺手转一手文字：导员不点播放也能知道这段语音说了什么
     try {
-      const r = await api.asr({ kind: "audio", data: media.data, mime: media.mime });
+      const r = await api.asr({ kind: "audio", data: media.data, asr: media.asr, mime: media.mime });
       if (r?.ok && r.text) media.transcript = r.text;
     } catch {
       /* 转写不通就只发语音 */

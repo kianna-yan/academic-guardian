@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AgentBriefing from "@/components/AgentBriefing.vue";
 import CitationList from "@/components/CitationList.vue";
 import MarkdownBody from "@/components/MarkdownBody.vue";
@@ -144,6 +144,20 @@ const busy = ref(false);
 const mediaError = ref("");
 const imageInput = ref<HTMLInputElement | null>(null);
 const videoInput = ref<HTMLInputElement | null>(null);
+
+/**
+ * 后端到底有没有语音识别能力（配没配 key）。
+ * 有就以后端转写为准——它比浏览器那份完整；没有就别白等一轮失败的请求。
+ */
+const asrReady = ref<boolean | null>(null);
+onMounted(async () => {
+  try {
+    const h = await api.mediaHealth();
+    asrReady.value = !!h?.enabled;
+  } catch {
+    asrReady.value = null; // 探不到就按「不确定」处理，见 stopRec
+  }
+});
 
 /* 「+」里的附件菜单、以及「按住说话」的手势状态 */
 const menuOpen = ref(false);
@@ -316,19 +330,44 @@ async function stopRec() {
   busy.value = true;
   try {
     const media = await handle.stop();
-    // 先把音频交给后端转写；不通就用浏览器那份，都没有才说没听清
-    try {
-      const r = await api.asr({ kind: "audio", data: media.data, mime: media.mime });
-      if (r?.ok && r.text) media.transcript = r.text;
-    } catch {
-      /* 后端不可达就用浏览器转写 */
+    const heard = (media.transcript || "").trim();
+    // 后端有识别能力（配了 key）就以它为准：浏览器那份是实时的，常只转出小半句
+    // （实测同一段话浏览器只给「做到。」，后端给的是完整一句）。
+    // 后端没有能力时：浏览器已经转出字就别再白等一轮失败请求，没转出才去问原因。
+    let serverNote = "";
+    if (asrReady.value === true || !heard) {
+      try {
+        const r = await api.asr({ kind: "audio", data: media.data, asr: media.asr, mime: media.mime });
+        if (r?.ok && r.text) media.transcript = r.text;
+        else serverNote = r?.note || "";
+      } catch (e: any) {
+        /* 后端不可达就看浏览器那份，都没有才说没听清 */
+        serverNote = e?.message || "";
+      }
     }
+    const said = (media.transcript || "").trim();
+    if (!said) {
+      // 没识别出来就别把这条语音塞进输入框：它发出去只会得到「听不清」，
+      // 而且用户会以为系统在装懂。直接说清是哪一环不通，让人有下一步可做。
+      const why = handle.reason();
+      if (why === "network" || why === "service-not-allowed") {
+        note("这个浏览器连不上语音识别服务，语音转不出字。换成打字发问更快");
+      } else if (why === "not-allowed") {
+        note("麦克风权限被拒了，先在地址栏允许麦克风再用语音");
+      } else if (/key|资源包|额度/.test(serverNote)) {
+        // 服务端没接语音识别（演示环境常见）：说清是环境问题，
+        // 并给出两条真能走通的路，别让人反复重说
+        note("这台服务器没配语音识别，语音转不出字。换 Edge 用浏览器自带识别，或直接打字发问");
+      } else if (serverNote) {
+        note(`语音没转成文字：${serverNote}。可以先打字发问`);
+      } else {
+        note("没听清这段语音。说完停半秒再松手，或直接把问题打字发来");
+      }
+      return;
+    }
+    media.transcript = said;
     addAttach(media);
-    if (media.transcript) {
-      draft.value = (draft.value + " " + media.transcript).trim();
-    } else {
-      note("没听清这段语音。可以说慢一点，或直接把问题打字发来");
-    }
+    draft.value = (draft.value + " " + said).trim();
   } catch (e: any) {
     note(e?.message || "录音失败");
   } finally {
@@ -690,6 +729,7 @@ const INTENT_LABEL: Record<string, string> = {
   letter: "生成家长信",
   report: "生成日报",
   unknown: "关键词没命中，交给模型判断",
+  voice_unclear: "语音没听清",
   llm_route: "模型直接作答",
   llm_tool: "模型自己决定取哪些数据",
   skill: "按技能生成",
