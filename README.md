@@ -2,7 +2,7 @@
 
 > 面向高校的**学业预警智能体**。以学生端为主视角，同时覆盖辅导员、教务、家长、任课教师四个协同角色，共五个端。
 
-![状态](https://img.shields.io/badge/状态-开发中-blue)
+![状态](https://img.shields.io/badge/状态-已交付-blue)
 ![技术栈](https://img.shields.io/badge/FastAPI%20%2B%20Vue%203%20%2B%20Hybrid%20RAG-informational)
 ![许可](https://img.shields.io/badge/license-MIT-green)
 
@@ -361,7 +361,7 @@ RAG_EMBED_MODEL=embedding-3      # 可选，检索的向量通道；RAG_EMBED=0 
 **如何确认确实连上了**（三处可查，都不需要看代码）：
 
 1. 侧边栏底部徽标：`大模型已接入 · glm-5.3-flash`；
-2. 开启浏览器开发者工具的 SSE 事件流，`POST /api/chat` 会返回 `thought` / `tool` / `delta` 事件，`meta.intent` 为 `llm_route` / `llm_tool` 说明这一问是模型自己决定取数的；
+2. 开启浏览器开发者工具的 SSE 事件流，`POST /api/chat/stream` 会返回 `thought` / `tool` / `delta` 事件，`meta.intent` 为 `llm_route` / `llm_tool` 说明这一问是模型自己决定取数的；
 3. 直接请求 `GET /api/llm/status`（需登录 token），返回 `{"enabled":true,"ok":true,"model":"glm-5.3-flash","route_model":"glm-4.5-air"}`。
 
 同一批问题在两种模式下的差别：接入前所有拿不准的问法都会落到同一句能力清单；接入后模型自己发起工具调用，回答里带具体数字与归因。
