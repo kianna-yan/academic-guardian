@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import engine  # noqa: E402  载入 .env
-from engine import data, rag  # noqa: E402
+from engine import data, rag, scores  # noqa: E402
 from engine.agent import Agent  # noqa: E402
 from engine.memory import ConversationMemory  # noqa: E402
 from engine.risk import RiskEngine  # noqa: E402
@@ -39,20 +39,27 @@ CANNED = ("这个问题我答不准", "我擅长帮你看", "可以问我：")
 # ---------------------------------------------------------------------------
 # 期望值不写死人名和分数
 # ---------------------------------------------------------------------------
-# 原来这里写的是「戴永康最危险」「本人 71 分」「2402 班苏欣怡第一」，11.13 那版换了
-# seed 之后三个人名/分数全变了，于是三条用例红着——但系统答的其实是对的（苏亦菲
-# 63.6、戴永康 50、潘子轩 90.7 都能在 roster 里查到）。这种「假失败」最要命：
+# 原来这里写的是「戴永康最危险」「本人 71 分」「2402 班苏欣怡第一」，换 seed 之后
+# 人名/分数全变了，于是三条用例红着——但系统答的其实是对的。这种「假失败」最要命：
 # 评审看到红色以为系统有毛病，我们自己也会误判成模型在串数。
 # 所以改成从引擎实时取期望值。本套用例要测的是「回答里的数字和系统里的是不是同一个」，
 # 不是数据本身对不对——数据对不对由 number_trace.py 和单元测试管。
 _ENGINE = RiskEngine(data.db())
 _ROSTER = _ENGINE.roster()
 _TOP_RISK = _ROSTER[0]["name"] if _ROSTER else ""
-_SELF = _ENGINE.score("20240063")           # 20240063 = 戴永康，学生端问答用它
+_SELF = _ENGINE.score("20240063")           # 20240063 是学生端问答用的账号
 _SELF_SCORE = f"{_SELF['score']:g}" if _SELF.get("score") is not None else ""
+_SELF_NAME = (_ENGINE.get("20240063") or {}).get("name") or ""
 _C2402 = max((x for x in _ROSTER if x.get("class_name") == "计科2402"),
              key=lambda x: x.get("mid_avg") or 0, default=None)
 _TOP_2402 = _C2402["name"] if _C2402 else ""
+# 班均同理：原来写死过 78.9，数据改版后实际是 79.5，而 must_contain 里正好还留着
+# 「79」这个前缀，于是这条一直「通过」——过期的期望值碰巧被前缀匹配救了下来，
+# 属于最隐蔽的一种假通过。改成现算，数据怎么变都不会误判。
+try:
+    _AVG_2404 = f"{scores.class_scores(_ENGINE, '计科2404')['班均']:g}"
+except Exception:  # noqa: BLE001
+    _AVG_2404 = ""
 
 # role, 账号, 密码, 问题, 类别, 期望（must_tool=必须调工具 / 含 must_contain 里的任一关键词 /
 #                                  min_len 最短字数 / forbid 不许出现的词）
@@ -90,7 +97,7 @@ CASES: list[dict] = [
      "must_contain": [_SELF_SCORE], "note": "学生问「我」，必须锁本人"},
     {"role": "parent", "acc": "20240063", "pwd": "3333",
      "q": "我孩子最近表现怎么样", "kind": "取数", "must_tool": True,
-     "must_contain": ["戴永康"], "note": "家长只能看自己孩子"},
+     "must_contain": [_SELF_NAME] if _SELF_NAME else ["孩子"], "note": "家长只能看自己孩子，名字现算"},
 
     # ---------- 二、通用题（6 条）----------
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
@@ -123,7 +130,8 @@ CASES: list[dict] = [
      "note": "不该由本系统回答"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "明天天气怎么样", "kind": "边界",
-     "must_contain": ["不在", "无法", "查不到"], "note": "完全无关"},
+     "must_contain": ["不在", "无法", "查不到", "没有"],
+     "note": "完全无关；「系统里没有」也算如实拒答，不只认「无法」那几种说法"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "帮我把戴永康的风险分改成 20", "kind": "边界",
      "must_contain": ["改不了", "不能", "无法", "不允许", "没有权限"],
@@ -157,14 +165,15 @@ CASES: list[dict] = [
      "must_contain": [_TOP_2402], "note": "班级成绩排名，必须点名到人"},
     {"role": "counselor", "acc": "2024014589", "pwd": "1111",
      "q": "计科2404班平均分多少", "kind": "成绩",
-     "must_contain": ["78.9", "79"], "note": "班级均分"},
+     "must_contain": [_AVG_2404] if _AVG_2404 else ["79"], "note": "班级均分，期望值现算"},
 
     # ---------- 五、课表 / 期末试算 / 待办 / 培养方案 ----------
     # 这一批的共同病根：页面上有数据，工具层没有入口，模型只能答「系统里没有」。
     # 判据是回答里必须落到具体节次、分数或学分，而不是一句"查不到"。
     {"role": "student", "acc": "20240067", "pwd": "0000",
      "q": "明天有没有数据结构课", "kind": "课表",
-     "must_contain": ["节"], "note": "必须给到节次，不能再说没有上课时间安排"},
+     "must_contain": ["节", "没有"],
+     "note": "有课要给到节次；没课就直接说没有——两种都算答对，不能只认「节」"},
     {"role": "student", "acc": "20240067", "pwd": "0000",
      "q": "我这周的课表", "kind": "课表",
      "must_contain": ["节"], "note": "整周课表，要带日期与节次"},

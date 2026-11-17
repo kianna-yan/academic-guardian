@@ -34,12 +34,13 @@ CATALOG: list[dict] = [
         "desc": "6 页学情汇报，投屏就能讲",
         "ext": "pptx",
         "kind": "file",
-        "roles": ["student", "parent", "counselor", "admin"],
+        "roles": ["student", "parent", "counselor", "admin", "teacher"],
         "hints": {
             "student": "把这学期的情况整理成一份能讲的汇报",
             "parent": "把孩子这学期的情况整理成一份汇报",
             "counselor": "把本班这学期的情况整理成一份汇报",
             "admin": "把全校这学期的情况整理成一份汇报",
+            "teacher": "把我课上这些学生这学期的情况整理成一份汇报",
         },
     },
     {
@@ -49,12 +50,13 @@ CATALOG: list[dict] = [
         "desc": "一页纸报告，打印、存档都合适",
         "ext": "pdf",
         "kind": "file",
-        "roles": ["student", "parent", "counselor", "admin"],
+        "roles": ["student", "parent", "counselor", "admin", "teacher"],
         "hints": {
             "student": "把这学期的学情整理成一页纸，我要打印存档",
             "parent": "把孩子这学期的情况整理成一页纸",
             "counselor": "把今天的预警情况整理成一页纸",
             "admin": "把今天全校的预警情况整理成一页纸",
+            "teacher": "把我课上这些学生这学期的情况整理成一页纸",
         },
     },
     {
@@ -64,12 +66,13 @@ CATALOG: list[dict] = [
         "desc": "可编辑的报告，方便加批注",
         "ext": "docx",
         "kind": "file",
-        "roles": ["student", "parent", "counselor", "admin"],
+        "roles": ["student", "parent", "counselor", "admin", "teacher"],
         "hints": {
             "student": "把这学期的学情整理成可编辑的报告，我要写批注",
             "parent": "把孩子这学期的情况整理成 Word",
             "counselor": "把今天的预警日报整理成 Word，我要改一改",
             "admin": "把今天的预警日报整理成 Word，我要改一改",
+            "teacher": "把我课上这些学生的学情整理成 Word，我要加批注",
         },
     },
     {
@@ -89,8 +92,9 @@ CATALOG: list[dict] = [
         "desc": "休学 / 免修 / 调课 / 复核等六类",
         "ext": "docx",
         "kind": "draft",
-        "roles": ["counselor", "admin"],
+        "roles": ["counselor", "admin", "teacher"],
         "hint": "按模板起草一份教务文书",
+        "hints": {"teacher": "按模板起草一份文书，休学 / 免修 / 调课 / 复核都行"},
         "note": "只起草，不代提交",
         "subs": [
             {"key": "suspend", "name": "休学申请", "desc": "含审批栏与材料清单"},
@@ -633,23 +637,28 @@ def _md_sections(md: str) -> list[tuple[str, list[str]]]:
     return secs or [("总览", ["暂无内容"])]
 
 
-def render_class(key: str, rep: dict, engine) -> tuple[bytes, str, str]:
-    """班级 / 全校视角的导出：PPT 走既有的学期汇报，Word 走日报，PDF 现场排版。"""
+def render_class(key: str, rep: dict, engine, label: str = "") -> tuple[bytes, str, str]:
+    """班级 / 全校 / 任课班级视角的导出：PPT 走既有的学期汇报，Word 走日报，PDF 现场排版。
+
+    label 只影响文件名与 PDF 标题（教师端传「我课上的学情」），
+    排版与取数完全共用，避免三套格式说出三个口径。
+    """
     meta = BY_KEY[key]
     ext = meta.get("ext")
     if not ext:
         raise KeyError(f"{key} 不是文件类技能")
     day = datetime.now().strftime("%Y%m%d")
+    tag = label or "学业预警学期汇报"
     if ext == "pptx":
         return (
             exporter.semester_pptx(rep, engine).getvalue(),
-            f"学业预警学期汇报_{day}.pptx",
+            f"{tag}_{day}.pptx",
             MIME["pptx"],
         )
     if ext == "docx":
         return (
             exporter.daily_report_docx(rep).getvalue(),
-            f"每日预警日报_{rep.get('date', day)}.docx",
+            f"{label or '每日预警日报'}_{rep.get('date', day)}.docx",
             MIME["docx"],
         )
     # 日报的 summary 是一句话，不是字典
@@ -657,9 +666,9 @@ def render_class(key: str, rep: dict, engine) -> tuple[bytes, str, str]:
     if not isinstance(head, str):
         head = str(head)
     pdf = simple_pdf.build_pdf(
-        "学业预警日报",
+        label or "学业预警日报",
         f"{rep.get('date', '')} · 第 {rep.get('week', '-')} 教学周 · 生成于 {rep.get('generated_at', '')}",
         _md_sections(rep.get("body", "")),
         footer=f"学业护航 · {head[:60]}" if head else "学业护航",
     )
-    return pdf, f"每日预警日报_{rep.get('date', day)}.pdf", MIME["pdf"]
+    return pdf, f"{label or '每日预警日报'}_{rep.get('date', day)}.pdf", MIME["pdf"]

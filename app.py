@@ -285,6 +285,9 @@ class MediaIn(BaseModel):
     name: str | None = None
     mime: str | None = None
     data: str | None = None
+    # 语音另带一份 16kHz WAV：浏览器录出来的是 webm/opus，语音模型不收，
+    # 没有这份就只能撞运气。data 那份留给前端回放。
+    asr: str | None = None
     frames: list[str] | None = None
     duration: float | None = None
     transcript: str | None = None
@@ -893,16 +896,19 @@ def asr_upload(body: MediaIn, request: Request):
     """语音转写：录音传上来，返回文字。
 
     进对话前先转一遍，用户能在输入框里看到自己说了什么、改一改再发。
-    glm-asr 需要单独的语音资源包，额度不足时 ok=false，前端会自动降级到
+    glm-asr-2512 走通用额度，失败时 ok=false，前端会自动降级到
     浏览器自带的语音识别；两条都不通就如实告诉用户没听清。
     """
     from engine import multimodal
 
     if (body.kind or "").lower() != "audio":
         raise HTTPException(400, "只接受音频")
-    if not (body.data or "").strip():
+    # 优先用前端另采的 16kHz WAV（语音模型认这个），没有才退回 webm 原音
+    raw = (body.asr or body.data or "").strip()
+    if not raw:
         raise HTTPException(400, "没有收到音频数据")
-    return multimodal.asr(body.data, )
+    mime = "audio/wav" if body.asr else (body.mime or "")
+    return multimodal.asr(raw, mime=mime)
 
 
 @app.get("/api/media/health")
@@ -986,11 +992,19 @@ def skills_export(body: SkillIn, request: Request):
             ctx = documents.context(ENGINE, target, p, "")
             data, name, mime = documents.render(sub, ctx)
         elif not sid:
-            # 导员 / 教务没有"某个学生"的语境，导的是班级·全校那一层
-            if role not in ("counselor", "admin"):
+            # 导员 / 教务 / 教师都没有"某个学生"的语境：
+            # 导员与教务导班级·全校那一层，教师只导「自己课上」这一层。
+            if role == "teacher":
+                rep = report_mod.teacher_report(
+                    ENGINE, p.get("advisor") or p.get("name") or "",
+                    week=DATASET.get("week"))
+                data, name, mime = skills_mod.render_class(
+                    body.skill, rep, ENGINE, label="我课上的学情")
+            elif role in ("counselor", "admin"):
+                rep = REPORT_STATE["last_report"] or _build_report()
+                data, name, mime = skills_mod.render_class(body.skill, rep, ENGINE)
+            else:
                 raise HTTPException(400, "还没有可以导出的学生")
-            rep = REPORT_STATE["last_report"] or _build_report()
-            data, name, mime = skills_mod.render_class(body.skill, rep, ENGINE)
         else:
             ENGINE.get(sid)
             data, name, mime = skills_mod.render(body.skill, ENGINE, sid)

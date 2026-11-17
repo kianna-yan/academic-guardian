@@ -73,13 +73,13 @@ _SPEC: dict[str, dict] = {
     "get_timetable": {
         "desc": "查询课表：某个时间点有哪些课——哪一天、第几节、什么课、在哪间教室、谁教、上过没有、"
                 "记没记过课后自评，并给出「下一节课」。"
-                "when 支持「今天 / 明天 / 后天 / 本周 / 下周 / 周三 / 第 8 周 / 下一节课」，不填按本周算。"
+                "when 支持「今天 / 明天 / 后天 / 本周 / 下周 / 周三 / 第 8 周 / 下一节课」，也支持具体日期「11月18日 / 2026-11-18 / 11-18」（会换算成对应教学周与星期），不填按本周算。**用户说了某月某日就必须原样传进来**，不要自己换算成「本周/下周」。"
                 "凡是问「明天有没有课」「我周三第几节在哪上课」「这周课表」「下节课是什么」都用这个。"
                 "**不要用 get_courses 回答上课时间**——那个工具只有课程与教师档案，没有节次和教室。",
         "params": {
             "name": {"type": "string", "description": "学生姓名或学号"},
             "when": {"type": "string",
-                     "description": "时间范围：今天 / 明天 / 后天 / 本周 / 下周 / 周三 / 第 8 周 / 下一节课"},
+                     "description": "时间范围：今天 / 明天 / 后天 / 本周 / 下周 / 周三 / 第 8 周 / 下一节课，或具体日期如 11月18日、2026-11-18"},
             "course": {"type": "string", "description": "只看某一门课，如「数据结构」；不填看全部"},
         },
         "required": ["name"],
@@ -478,15 +478,56 @@ _CN_WEEKDAY = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日"
 _WEEKDAY_LABEL = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 
+def _parse_day(when: str, default_year: int):
+    """从一句问法里抠出具体日期；抠不到返回 None。
+
+    支持 2026-11-18 / 2026年11月18日 / 11月18日 / 11月18号 / 11-18 / 11/18。
+    纯数字的「11-18」只在没出现「节」的时候认——否则「第 1-2 节」会被当成 1 月 2 日。
+    """
+    import re
+    from datetime import date
+
+    text = (when or "").strip()
+    if not text:
+        return None
+
+    def build(y: int, mo: int, d: int):
+        try:
+            return date(y, mo, d)
+        except ValueError:
+            return None
+
+    m = re.search(r"(20\d{2})\s*[年\-/.]\s*(\d{1,2})\s*[月\-/.]\s*(\d{1,2})", text)
+    if m:
+        return build(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+    m = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?", text)
+    if m:
+        return build(default_year, int(m.group(1)), int(m.group(2)))
+
+    if "节" not in text:
+        m = re.search(r"(?<![\d:：])(\d{1,2})\s*[-/]\s*(\d{1,2})(?![\d:：])", text)
+        if m:
+            return build(default_year, int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _week_of(d) -> int:
+    """某一天是第几个教学周（可能是 0 或负数，调用方自己判断越界）。"""
+    from .data import WEEK1_MONDAY
+
+    return (d - WEEK1_MONDAY).days // 7 + 1
+
+
 def _window(when: str, today, week: int) -> tuple[str, str, str, str]:
-    """把「明天 / 本周 / 周三 / 第 8 周」解析成日期区间。
+    """把「明天 / 本周 / 周三 / 第 8 周 / 11月18日」解析成日期区间。
 
     返回 (标签, 起始日, 结束日, 口径说明)；标签为 next 表示问的是「下一节课」。
     """
     import re
     from datetime import timedelta
 
-    from .data import WEEK1_MONDAY
+    from .data import SESSIONS_TOTAL, WEEK1_MONDAY
 
     when = (when or "").strip()
 
@@ -506,8 +547,21 @@ def _window(when: str, today, week: int) -> tuple[str, str, str, str]:
     if m:
         return week_rng(f"第{m.group(1)}周", int(m.group(1)))
     if "下周" in when:
+        # 「下周三」要的是下周那一天，不是整周——先认这个组合，再退回整周
+        m = re.search(r"下(?:个)?(?:周|星期|礼拜)([一二三四五六日天])", when)
+        if m:
+            idx = _CN_WEEKDAY[m.group(1)]
+            monday = monday_of(week + 1)
+            d = monday + timedelta(days=idx)
+            return rng(f"下周{_WEEKDAY_LABEL[idx][1:]}", d, d, f"第 {week + 1} 教学周")
         return week_rng("下周", week + 1)
     if "上周" in when:
+        m = re.search(r"上(?:个)?(?:周|星期|礼拜)([一二三四五六日天])", when)
+        if m:
+            idx = _CN_WEEKDAY[m.group(1)]
+            monday = monday_of(week - 1)
+            d = monday + timedelta(days=idx)
+            return rng(f"上周{_WEEKDAY_LABEL[idx][1:]}", d, d, f"第 {week - 1} 教学周")
         return week_rng("上周", week - 1)
     if "今天" in when or "今日" in when:
         return rng("今天", today, today)
@@ -520,6 +574,24 @@ def _window(when: str, today, week: int) -> tuple[str, str, str, str]:
     if "昨天" in when:
         d = today - timedelta(days=1)
         return rng("昨天", d, d)
+
+    # 「11月18日 / 2026-11-18 / 11-18」：具体某一天。
+    # 少了这一段，问「11月18日有几节课」会一路掉到最后的「本周」兜底，
+    # 答成当前教学周（第 8 周 10-19~10-23），日期和课表全都对不上——
+    # 这不是模型说错，是它拿不到可选参数。
+    d = _parse_day(when, today.year)
+    if d:
+        wk = _week_of(d)
+        if 1 <= wk <= SESSIONS_TOTAL:
+            note = f"第 {wk} 教学周{_WEEKDAY_LABEL[d.weekday()]}"
+        else:
+            note = f"该日不在本学期教学周内（本学期为第 1–{SESSIONS_TOTAL} 周）"
+        return rng(f"{d.month} 月 {d.day} 日", d, d, note)
+    m = re.search(r"(?:本|这)(?:个)?(?:周|星期|礼拜)([一二三四五六日天])", when)
+    if m:
+        idx = _CN_WEEKDAY[m.group(1)]
+        d = monday_of(week) + timedelta(days=idx)
+        return rng(_WEEKDAY_LABEL[idx], d, d, f"本周第 {week} 周")
     if any(k in when for k in ("本周", "这周", "这星期", "这个星期", "全周", "课表", "一周")):
         return week_rng("本周", week)
     # 「周三 / 星期三 / 礼拜三」：定位到本周那一天

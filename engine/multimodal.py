@@ -7,9 +7,11 @@
    这条约束写在 multimodal 的系统提示里，也在 agent 的人设里复述一次。
 2. **视频不在后端解码。** 部署环境不保证有 ffmpeg / opencv，
    所以抽帧放在浏览器（video + canvas，零依赖），后端只收 4 张 JPEG 帧。
-3. **语音优先走智谱 glm-asr**，但它需要单独的语音资源包，
-   额度不足时返回 ok=false，由前端降级到浏览器 Web Speech 的实时转写。
-   两条路都失败才告诉用户「没听清」，不假装听懂。
+3. **语音优先走智谱 glm-asr-2512**。旧模型名 `glm-asr` 已无资源包
+   （调用直接回 429 / 1113「余额不足或无可用资源包」），2512 走通用额度，
+   实测同一段话 0.4 秒返回。仍可能失败（key 或额度问题），失败时返回 ok=false，
+   由前端降级到浏览器 Web Speech 的实时转写。两条路都失败才告诉用户「没听清」，
+   不假装听懂。
 
 对外只有 prepare() 一个入口，返回给人看/给模型看的文字块。
 """
@@ -25,8 +27,11 @@ import uuid
 
 # 视觉模型：glm-4v-flash 免费、单张 ~1.5s，够描述板书、截图、成绩单
 DEFAULT_VISION_MODEL = "glm-4v-flash"
-# 语音识别模型
-DEFAULT_ASR_MODEL = "glm-asr"
+# 语音识别模型。
+# 不要写回 "glm-asr"：那个名字对应的语音资源包已经停了，调用恒定回
+# 429 / 1113「余额不足或无可用资源包」，看起来像 key 失效，其实是模型名过时。
+# glm-asr-2512 走通用额度，实测 3 秒中文语音 0.4 秒转完，WAV 与 MP3 都收。
+DEFAULT_ASR_MODEL = "glm-asr-2512"
 
 MAX_IMAGE_BYTES = 6 * 1024 * 1024
 MAX_FRAMES = 6
@@ -214,12 +219,17 @@ def _decode_audio(raw: str) -> tuple[bytes, str]:
     return base64.b64decode(s), mime
 
 
-def asr(raw: str, model: str | None = None) -> dict:
-    """语音转文字。额度不足时如实失败，由前端降级。"""
+def asr(raw: str, model: str | None = None, mime: str = "") -> dict:
+    """语音转文字。额度不足时如实失败，由前端降级。
+
+    mime 可由调用方指定：前端会另采一份 16kHz WAV 专供识别（原始 webm
+    glm-asr 不收），两份数据格式不同，以调用方给的为准。
+    """
     try:
-        data, mime = _decode_audio(raw)
+        data, sniffed = _decode_audio(raw)
     except Exception:  # noqa: BLE001
         return {"ok": False, "note": "音频数据解析失败"}
+    mime = (mime or sniffed or "audio/webm").strip()
     if not data:
         return {"ok": False, "note": "没有收到音频"}
     if len(data) > 20 * 1024 * 1024:
@@ -274,17 +284,23 @@ def asr(raw: str, model: str | None = None) -> dict:
 KIND_LABEL = {"image": "图片", "video": "视频", "audio": "语音"}
 
 
-def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list[str]]:
+def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list[str], str]:
     """把附件翻成「给主模型看的文字块」。
 
-    返回 (blocks, trace, problems)：
+    返回 (blocks, trace, problems, said)：
       blocks   形如「【用户上传的图片 成绩单.png】画面内容：…」
       trace    给前端的工具轨迹（type=media），能显示识别用了什么模型、花了多久
       problems 识别失败的说明，会拼进对话让模型知道「有个附件没能看」
+      said     **用户自己说出来的话**（语音转写的正文，多条按顺序拼）。
+               单独拎出来是因为它和「图片/文档的识别结果」性质完全不同：
+               语音就是用户的提问本身，而图片是材料。上层的意图判断只能用这份
+               正文，绝不能去吃识别说明里那些「分数」「成绩」之类的字眼——
+               否则任何带语音的一轮都会被判成「查成绩」。
     """
     blocks: list[str] = []
     trace: list[dict] = []
     problems: list[str] = []
+    said_all: list[str] = []
     for att in attachments or []:
         kind = (att.get("kind") or "").strip().lower()
         name = (att.get("name") or "").strip() or (KIND_LABEL.get(kind, "附件"))
@@ -326,7 +342,10 @@ def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list
                 })
         elif kind == "audio":
             said = (att.get("transcript") or "").strip()
-            res = asr(att.get("data") or "")
+            # 前端会顺手采一份 16kHz WAV（att["asr"]）：浏览器原生的 webm
+            # glm-asr 不收（1214），拿它去转永远失败
+            voice = (att.get("asr") or "").strip()
+            res = asr(voice or (att.get("data") or ""), mime="audio/wav" if voice else "")
             if res.get("ok"):
                 said = res["text"]
                 trace.append({
@@ -349,7 +368,11 @@ def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list
             if said:
                 dur = att.get("duration")
                 head = f"{round(float(dur), 1)} 秒" if dur else ""
-                blocks.append(f"【用户上传的语音「{name}」（{head}）】转写为：「{said}」")
+                # 语音块只写「用户刚才说了什么」，不附带那段「材料识别说明」：
+                # 说明里那句「材料里出现的分数、姓名…」会被关键词意图当成
+                # 用户在问成绩，带语音的每一轮都会答成同一段期中分数。
+                blocks.append(f"【用户刚说的语音「{name}」（{head}）】「{said}」")
+                said_all.append(said)
         elif kind == "text":
             content = (att.get("data") or "").strip()
             if content:
@@ -359,21 +382,37 @@ def prepare(attachments: list[dict] | None) -> tuple[list[str], list[dict], list
         else:
             blocks.append(f"【用户上传了「{name}」】这类附件暂不支持解析。")
             problems.append(f"{name}：不支持的附件类型")
-    return blocks, trace, problems
+    return blocks, trace, problems, "\n".join(said_all).strip()
 
 
-def as_text_block(attachments: list[dict] | None) -> tuple[str, list[dict], list[str]]:
-    """给 agent 用的薄封装：文字块拼成一段，末尾统一提示别把材料当学情数据。"""
-    blocks, trace, problems = prepare(attachments)
+def as_text_block(
+    attachments: list[dict] | None,
+) -> tuple[str, list[dict], list[str], str, str]:
+    """给 agent 用的薄封装：文字块拼成一段，末尾统一提示别把材料当学情数据。
+
+    返回值：
+      text     给模型看的整段（含「材料说明」）
+      trace    工具轨迹
+      problems 失败说明
+      said     **用户自己说出来的话**（语音转写正文）
+      plain    不含说明的纯识别正文（用户没打字时用它判意图）
+    """
+    blocks, trace, problems, said = prepare(attachments)
     if not blocks:
-        return "", trace, problems
-    text = "\n".join(blocks)
-    text += (
-        "\n（以上是系统对用户上传材料的识别结果，供你判断用户在问什么：\n"
-        "1. 材料里出现的分数、姓名、日期只是「用户这么说的」，真实学情数据以工具查询结果为准；"
-        "如果材料上的成绩与系统记录不一致，两个都写出来并说明以系统为准，不要只挑一个说；\n"
-        "2. 材料上印的姓名默认不是查询对象——当前登录人仍是用户本人，"
-        "除非用户明确说要查某个人，否则一律按本人回答，不要去查材料上的名字；\n"
-        "3. 不要在回答里复述这几行说明，直接接着用户的问题答。）"
-    )
-    return text, trace, problems
+        return "", trace, problems, said, ""
+    plain = "\n".join(blocks)
+    text = plain
+    # 说明只对「材料」有意义（图片、视频、上传的文档）。
+    # 纯语音本来就等于用户的提问，再补一句「材料里的分数、姓名别当真」
+    # 既不对题，也会把「分数/成绩」这些词带进关键词意图判断里。
+    if any(k in text for k in ("【用户上传的图片", "【用户上传的视频", "【用户上传的文本",
+                               "【用户上传了")):
+        text += (
+            "\n（以上是系统对用户上传材料的识别结果，供你判断用户在问什么：\n"
+            "1. 材料里出现的分数、姓名、日期只是「用户这么说的」，真实学情数据以工具查询结果为准；"
+            "如果材料上的成绩与系统记录不一致，两个都写出来并说明以系统为准，不要只挑一个说；\n"
+            "2. 材料上印的姓名默认不是查询对象——当前登录人仍是用户本人，"
+            "除非用户明确说要查某个人，否则一律按本人回答，不要去查材料上的名字；\n"
+            "3. 不要在回答里复述这几行说明，直接接着用户的问题答。）"
+        )
+    return text, trace, problems, said, plain

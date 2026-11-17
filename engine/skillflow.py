@@ -158,6 +158,42 @@ def _file(agent, role: str, sid: str | None, profile: dict, emit, t0: float, key
                             {"skill": key, "sid": sid, "note": f"按 {b['name']} 的学情渲染{name}"},
                             f"{b['name']} · 学情聚合", len(b["courses"])))
         suggestions = _file_chips(role)
+    elif role == "teacher":
+        # 教师的口径是「我课上这批学生」，既不是某个学生，也不是全校
+        from engine.report import teacher_report
+
+        rep = teacher_report(agent.engine, profile.get("advisor") or profile.get("name") or "")
+        o = rep["overview"]
+        dist = o.get("dist") or {}
+        pct = o.get("dist_pct") or {}
+        _think(emit, thoughts, f"点了「{meta['name']}」：教师端没有单个学生的语境，"
+                               f"导出的是我课上这批学生的口径，回答也只说这门课上的事。")
+        lines = [f"**《{_class_filename(key, teacher=True)}》已生成**", "",
+                 f"这是我课上这批学生的口径（{profile.get('name') or '任课教师'}），"
+                 f"学生 {o.get('total')} 人：", ""]
+        lines.append(f"- 红色预警 {dist.get('red', 0)} 人（{pct.get('red', 0)}%）、"
+                     f"黄色关注 {dist.get('yellow', 0)} 人（{pct.get('yellow', 0)}%）")
+        worst = rep.get("by_class_top") or []
+        if worst:
+            lines.append("- 红预警最集中：" + "、".join(f"{x['class']}（{x['red']} 人）" for x in worst[:2]))
+        courses = rep.get("courses") or []
+        if courses:
+            lines.append("- 任课：" + "、".join(c.get("name", "") for c in courses[:4]))
+        if o.get("top_factors"):
+            lines.append("- 最普遍的风险因素：" + "、".join(
+                f"{f['label']}（均摊 {f['points']} 分）" for f in o["top_factors"][:3]))
+        lines += ["", "文件在下方，可直接投屏或打印；点名要某个学生的那份，说名字我另出一份。"]
+        citations.append({
+            "kind": "data",
+            "citation": f"我课上的学生 · {o.get('total')} 人",
+            "source": "teacher_view() · 任课班级统计",
+            "text": f"红 {dist.get('red', 0)} 人、黄 {dist.get('yellow', 0)} 人；"
+                    f"人均风险分 {o.get('avg_score')}。",
+        })
+        trace.append(_trace("skill_render",
+                            {"skill": key, "scope": "我课上", "note": f"按任课班级口径渲染{name}"},
+                            "students 表 · 任课班级", o.get("total") or 0))
+        suggestions = _file_chips(role)
     else:
         o = agent.engine.overview()
         dist = o.get("dist") or {}
@@ -194,8 +230,13 @@ def _file(agent, role: str, sid: str | None, profile: dict, emit, t0: float, key
     return _result(reply, "skill", trace, suggestions, t0, citations, thoughts)
 
 
-def _class_filename(key: str) -> str:
+def _class_filename(key: str, teacher: bool = False) -> str:
+    """文件名跟着口径走：教师端是「我课上的学情」，与下载下来的文件同名。"""
     day = datetime.now().strftime("%Y%m%d")
+    if teacher:
+        return {"ppt": f"我课上的学情_{day}.pptx",
+                "pdf": f"我课上的学情_{day}.pdf",
+                "word": f"我课上的学情_{day}.docx"}[key]
     return {"ppt": f"学业预警学期汇报_{day}.pptx",
             "pdf": f"每日预警日报_{day}.pdf",
             "word": f"每日预警日报_{day}.docx"}[key]
@@ -208,6 +249,8 @@ def _file_chips(role: str) -> list[str]:
         return ["孩子的成绩趋势怎么样", "学校什么情况下会通知家长", "导出家长信"]
     if role == "counselor":
         return ["本班谁的风险最高", "给他生成谈话要点", "今日日报说了什么"]
+    if role == "teacher":
+        return ["我课上谁最该盯", "哪门课缺交最多", "导出我课上的学情 PPT"]
     return ["全校风险分布如何", "今日日报说了什么", "导出学期汇报 PPT"]
 
 

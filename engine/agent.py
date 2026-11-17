@@ -103,6 +103,9 @@ _BASE_RULES = ("只能使用给定的事实与条款，不得编造数字或政�
                # 数字可溯源要覆盖到算术这一步：要么引用两个原始数字，要么用工具算好的字段。
                "不做心算：涉及差值、占比、涨跌时，直接引用给定的两个原始数字"
                "（例如「86 分，班级均分 76.9 分」），不要自己减、不要自己除。"
+               # 同理：问「11月18日」就原样交给课表工具，模型自己推星期一律会错。
+               "也不自己推日期：用户说了某月某日，就把这一天原样交给课表工具，"
+               "不要换算成「本周 / 下周」，也不要自己算它是星期几。"
                "注意结合最近对话理解指代（比如“他”指的是谁）。")
 
 PERSONAS: dict[str, str] = {
@@ -1121,6 +1124,8 @@ class Agent:
             return routed
 
         # ---- 多模态：先把附件认出来，再当成"用户说的话"接进同一条链路 ----
+        media_said = ""     # 语音转写出来的「用户原话」
+        media_plain = ""    # 附件识别正文（不含系统说明），只用于「用户没打字」时判意图
         if attachments:
             from . import multimodal
 
@@ -1130,7 +1135,8 @@ class Agent:
                 for k in sorted(kinds) if k
             ) or "附件"
             think(f"用户带了{label}，先看清内容再判断该查什么。")
-            media_block, media_trace, media_problems = multimodal.as_text_block(attachments)
+            (media_block, media_trace, media_problems,
+             media_said, media_plain) = multimodal.as_text_block(attachments)
             for item in media_trace:
                 trace.append(item)
                 if emit:
@@ -1144,6 +1150,32 @@ class Agent:
                         memory_key(profile), attachments, media_block)
             if media_problems:
                 self._last_media_problems = media_problems
+
+        # ---- 语音没转出字：如实说，不拿「识别失败」这句话去猜问题 ----
+        # 改造前这里会把「【用户发的语音】没能转成文字……」当成用户的提问送进
+        # 意图分类，被里面的「成绩/分数」判成查成绩，于是不管说什么都回同一段期中分数。
+        if (attachments and not (raw_message or media_said)
+                and any((a or {}).get("kind") == "audio" for a in attachments)):
+            why = "；".join(getattr(self, "_last_media_problems", None) or [])
+            think("这段语音没转成文字，先让用户重说一遍，不拿猜的问题作答。")
+            tip = f"（{why}）" if why else ""
+            reply = (
+                f"这段语音我没听清{tip}，所以不敢猜你在问什么。\n\n"
+                "- 再说一遍：说完停半秒再松手，离麦克风近一点；\n"
+                "- 或者直接把问题打字发来，比如「我这周哪天有课」「我的风险分为什么这么高」。"
+            )
+            if emit:
+                emit("meta", {"intent": "voice_unclear"})
+                emit("delta", {"text": reply})
+            return {
+                "reply": reply,
+                "intent": "voice_unclear",
+                "citations": [],
+                "trace": trace,
+                "thoughts": thoughts,
+                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                "suggestions": self._suggestions(role, "", sid),
+            }
 
         reread = ""
         # ---- 材料记忆：这轮没带附件，问的是「刚才那张图」 ----
@@ -1159,7 +1191,21 @@ class Agent:
                     if emit:
                         emit("tool", mat_trace)
 
-        intent = self._intent(message)
+        # ---- 意图只看「用户自己说的话」----
+        # 用户打的字优先；纯语音没打字时用转写正文；只发了图/文档时才看识别正文。
+        # 绝不能拿 message（含系统说明）去判意图：那段说明里有「分数」「成绩」
+        # 「姓名」，会把任何带附件的一轮都拽到 score 分支，表现就是
+        # 「不管我说什么，它都回同一段期中成绩」。这是本轮修复的核心。
+        intent_text = (raw_message or media_said or media_plain).strip()
+        if reread:
+            # 「刚才那张图里第三行是多少」这类追问，要连材料正文一起看
+            intent_text = (intent_text + "\n" + reread).strip()
+        intent = self._intent(intent_text) if intent_text else "unknown"
+
+        # 检索也只用「用户自己说的话」。把语音/图片的识别结果拼进查询，
+        # 会改变 BM25 的长度归一：同一句话打字问命中不到 0.45 的资料门槛，
+        # 带个语音附件就"命中"了，答出来的还是老师上传的试卷而不是要问的东西。
+        ask = intent_text or message
 
         if emit:
             emit("meta", {"intent": intent})
@@ -1169,7 +1215,7 @@ class Agent:
         # 「差不多的版本」，而课程资料的价值恰恰是「按老师发的那份原文答」。
         # 0.45 的阈值够挡住寒暄（「你好」只有 0.22），不会把闲聊也塞满引用。
         if intent in ("unknown", "material") and not citations:
-            mat_hits = self.t_policy(message, min_score=0.35 if intent == "material" else 0.45,
+            mat_hits = self.t_policy(ask, min_score=0.35 if intent == "material" else 0.45,
                                      kind="resource", top_k=8, limit=5)
             if mat_hits:
                 citations = mat_hits
@@ -1187,7 +1233,7 @@ class Agent:
             """实时查一次学生本人档案：写进轨迹，并返回给模型看的事实段落。"""
             nonlocal facts
             try:
-                f = self.student_facts(who_sid, role, raw_message or message, intent)
+                f = self.student_facts(who_sid, role, raw_message or media_said or message, intent)
             except Exception:  # noqa: BLE001 - 查不到档案不能挡住回答
                 return ""
             facts = f
@@ -1494,7 +1540,7 @@ class Agent:
                     for i, a in enumerate(acts[:3])))
             if intent == "policy":
                 think("这问的是制度条款，去校规知识库里检索。")
-                hits = call_rag(message, school=school)
+                hits = call_rag(ask, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
                 blocks.append(f"对照你的情况：风险分 {r['score']}，累计挂科学分 {s['history']['failed_credits']}。")
@@ -1521,7 +1567,7 @@ class Agent:
             if not blocks:
                 # 没听懂的问题：先试知识库；检索不到就直说不会，绝不拿风险分充数
                 think("没匹配到已知问法，先去校规知识库试一次。")
-                hits = call_rag(message, school=school)
+                hits = call_rag(ask, school=school)
                 if hits:
                     citations = hits
                     blocks.append(self._compose_policy(hits))
@@ -1574,7 +1620,7 @@ class Agent:
                 blocks.append(f"学校的告知函会写明 {s['name']} 的具体问题与补救路径，需要的话我可以导一份家长信给您。")
             elif intent == "policy" or any(w in message for w in ["通知", "规定", "政策", "什么时候", "多少", "几门", "降级", "毕业", "退学"]):
                 think("家长在问学校政策，检索制度库里关于家长通知的条款。")
-                hits = call_rag(message + " 家长 学业预警", school=school)
+                hits = call_rag(ask + " 家长 学业预警", school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
                 blocks.append(
@@ -1733,7 +1779,7 @@ class Agent:
                 blocks.append("教学层面可做：①缺勤集中的章节下次上课前提一句考勤；②作业未交的在下节课前补交截止；③红色学生建议联系辅导员联动。")
             elif intent == "policy":
                 think("问的是校规条款，去知识库检索。")
-                hits = call_rag(message, school=school)
+                hits = call_rag(ask, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
             elif intent == "contact":
@@ -1936,7 +1982,7 @@ class Agent:
                         blocks.append("当前没有符合条件的红色预警学生。")
             elif intent == "policy":
                 think("这问的是制度条款，去校规知识库里检索。")
-                hits = call_rag(message, school=school)
+                hits = call_rag(ask, school=school)
                 citations = hits
                 blocks.append(self._compose_policy(hits))
             elif intent == "contact":

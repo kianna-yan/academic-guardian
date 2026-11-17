@@ -265,9 +265,15 @@ def interventions_docx(interventions: dict, engine, scope: str = "全部学生")
 
 
 def daily_report_docx(report: dict) -> io.BytesIO:
-    """每日预警日报：定时任务产出，供早会与推送。"""
-    doc = _new_doc("每日学业预警日报")
-    _title(doc, "每日学业预警日报",
+    """每日预警日报：定时任务产出，供早会与推送。
+
+    教师端导出的是「我课上的学情」，标题跟着口径走，
+    否则同一份文件在老师手里写着「全校」，数字却是他课上的，容易误读。
+    """
+    teacher = report.get("scope") == "teacher"
+    head = "任课班级学情简报" if teacher else "每日学业预警日报"
+    doc = _new_doc(head)
+    _title(doc, head,
            f"{report.get('date', '')} · 第 {report.get('week', '-')} 教学周 · 自动生成")
     md_to_docx(doc, report.get("body", ""))
     _sign(doc, who="学业预警智能体（自动生成）")
@@ -342,8 +348,10 @@ def semester_pptx(report: dict, engine) -> io.BytesIO:
 
     # 1 封面
     s1 = add_slide()
+    teacher_scope = report.get("scope") == "teacher"
     band(s1, SCHOOL_NAME)
-    txt(s1, "学业预警工作学期汇报", Inches(0.8), Inches(2.3), Inches(8.4), Inches(1.2),
+    txt(s1, "任课班级学情汇报" if teacher_scope else "学业预警工作学期汇报",
+        Inches(0.8), Inches(2.3), Inches(8.4), Inches(1.2),
         size=40, bold=True, align=PP_ALIGN.CENTER)
     txt(s1, f"第 {report['week']} 教学周 · {report['date']}", Inches(0.8), Inches(3.6),
         Inches(8.4), Inches(0.5), size=16, color=MUTED_, align=PP_ALIGN.CENTER)
@@ -353,7 +361,7 @@ def semester_pptx(report: dict, engine) -> io.BytesIO:
 
     # 2 全校概览
     s2 = add_slide()
-    band(s2, "一、全校风险概览")
+    band(s2, "一、我课上的学生概览" if teacher_scope else "一、全校风险概览")
     cards = [
         (f"{o['total']}", "在册学生", INK_),
         (f"{dist['red']}", "红色预警", RED_),
@@ -372,7 +380,7 @@ def semester_pptx(report: dict, engine) -> io.BytesIO:
         Inches(0.6), Inches(3.8), Inches(8.8), Inches(0.5), size=15)
     top_factors = o.get("top_factors", [])[:3]
     if top_factors:
-        lines = ["· 全校最普遍的风险成因："] + [
+        lines = [("· 我课上最普遍的风险成因：" if teacher_scope else "· 全校最普遍的风险成因：")] + [
             f"   {f['label']}（均摊 {f['points']:.0f} 分）" for f in top_factors]
         txt(s2, "\n".join(lines), Inches(0.6), Inches(4.5), Inches(8.8), Inches(1.8), size=15)
 
